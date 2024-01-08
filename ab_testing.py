@@ -1,0 +1,774 @@
+import numpy as np
+import scipy.stats as st
+import matplotlib.pyplot as plt
+import seaborn as sns
+from tqdm import tqdm
+
+class ParentTestInterface:
+    """
+    Base interface for conducting statistical tests, particularly for A/B testing.
+    Provides foundational methods and attributes for subclass implementations.
+    
+    Parameters
+    ----------
+    confidence_level : float
+        The confidence level for calculating confidence intervals.
+    units_count : int
+        The number of simulations or units to be considered in the test.
+    random_state : int
+        The seed for the random number generator to ensure reproducibility.
+    """
+    
+    init_items = {}
+
+    def __init__(self, confidence_level, units_count, random_state):
+        """
+        Constructor for the ParentTestInterface class.
+        """
+        self.units_count = units_count
+        self.random_state = random_state
+        self.confidence_level = confidence_level
+        self._compute_confidence_bounds()
+        self.init_items = self.__dict__.copy()
+        
+    def __setattr__(self,key,value):
+        """
+        Custom attribute setter that updates confidence bounds when 
+        'confidence_level' changes.
+
+        Parameters
+        ----------
+        key : str
+            The name of the attribute to be set or modified.
+        value : various
+            The value to be set for the attribute.
+        """
+        if key == 'confidence_level':
+            super().__setattr__(key,value)
+            self._compute_confidence_bounds()
+        else:
+            super().__setattr__(key,value)
+            
+        if key in self.init_items and self.init_items[key] != value:
+            self.init_items[key] = value
+        
+    def _compute_confidence_bounds(self):
+        """
+        Internal method to compute the confidence bounds based on the given 
+        confidence level.
+        """
+        self.left_quant, self.right_quant =  (1 - self.confidence_level) / 2, 1 - (1 - self.confidence_level) / 2
+        
+    def _compute_ci(self, data):
+        """
+        Computes confidence intervals for given data.
+
+        Parameters
+        ----------
+        data : array-like
+            The data for which confidence intervals are to be computed.
+
+        Returns
+        -------
+        array-like
+            Confidence intervals for the provided data.
+        """
+        return np.quantile(data, [self.left_quant, self.right_quant])
+        
+    def _compute_uplift(self, before, after):
+        """
+        Calculates uplift, typically used for comparing metrics before and 
+        after the test.
+
+        Parameters
+        ----------
+        before : numeric
+            The metric value before the test or for the control group.
+        after : numeric
+            The metric value after the test or for the test group.
+
+        Returns
+        -------
+        numeric
+            Computed uplift value.
+        """
+        return (after - before) / before
+    
+    def get_test_parameters(self):
+        """
+        Calculates uplift, typically used for comparing metrics before and 
+        after the test.
+
+        Parameters
+        ----------
+        before : numeric
+            The metric value before the test or for the control group.
+        after : numeric
+            The metric value after the test or for the test group.
+
+        Returns
+        -------
+        numeric
+            Computed uplift value.
+        """
+        return self.init_items
+    
+    def _metric_distributions_chart(self, control_metric, test_metric, subplot, title, bins):
+        """
+        Draws a histogram chart for the distributions of control and test metrics.
+
+        Parameters
+        ----------
+        control_metric : array-like
+            Data points for the control group.
+        test_metric : array-like
+            Data points for the test group.
+        subplot : tuple
+            The subplot configuration (nrows, ncols, index).
+        title : str
+            The title of the chart.
+        bins : int
+            The number of bins for the histogram.
+        """
+        plt.subplot(*subplot)
+        sns.histplot(control_metric, label='control', bins=bins, stat='probability', color='#19D3F3')
+        sns.histplot(test_metric, label='test',bins=bins, stat='probability', color='C1')
+        plt.title(title)
+        plt.legend()
+        
+    def _uplift_distribtuion_chart(self, uplift_distribution, uplift, sublot, bins):
+        """
+        Draws a cumulative distribution chart for uplift.
+
+        Parameters
+        ----------
+        uplift_distribution : array-like
+            Data points for the uplift distribution.
+        uplift : float
+            The computed uplift value.
+        subplot : tuple
+            The subplot configuration (nrows, ncols, index).
+        bins : int
+            The number of bins for the histogram.
+        """
+        plt.subplot(*sublot)
+        thresh = 0
+        h = sns.histplot(x=uplift_distribution, bins=bins, stat='probability',cumulative=True, color='#636EFA')
+        for i in h.patches:
+            if i.get_x() <= thresh:
+                i.set_facecolor('#EF553B')
+        plt.axvline(x=uplift, color='black', linestyle='--')
+        plt.yticks(np.arange(0,1.1,0.1))
+        plt.title('Uplift Distribution')
+                
+    def resample():
+        """
+        Abstract method to be implemented in subclasses. Used for resampling 
+        in statistical tests.
+        """
+        raise NotImplementedError("Subclasses should implement this!")
+        
+    def compute():
+        """
+        Abstract method to be implemented in subclasses. Used for computing 
+        test results.
+        """
+        raise NotImplementedError("Subclasses should implement this!")
+    
+    def get_charts():
+        """
+        Abstract method to be implemented in subclasses. Used for generating 
+        charts related to the test results.
+        """
+        raise NotImplementedError("Subclasses should implement this!")
+
+
+class BayesBeta(ParentTestInterface):
+    """
+    Implements Bayesian approach to A/B testing using beta distributions.
+
+    This class extends ParentTestInterface, adding specific methods for Bayesian analysis.
+    
+    Parameters
+    ----------
+    confidence_level : float, default=0.95
+        The confidence level for calculating confidence intervals.
+    units_count : int, default=100000
+        The number of simulations for generating distributions.
+    random_state : int, optional
+        The seed for the random number generator to ensure reproducibility.
+    """
+
+    def __init__(self, confidence_level=0.95, units_count=100_000, random_state=None):
+        """
+        Constructor for the BayesBeta class.
+        """
+        super().__init__(confidence_level=confidence_level, units_count=units_count, random_state=random_state)
+            
+    def resample(self, nobs, counts, prior=()):
+        """
+        Generates beta distributions for control and test groups based on observations and prior data.
+
+        Parameters
+        ----------
+        nobs : list of int, length=2
+            The number of successes in the control and test groups, respectively.
+        counts : list of int, length=2
+            The total number of trials in the control and test groups, respectively.
+        prior : tuple or list, default=()
+            The prior parameters for the beta distributions. It can be a tuple or list of two or four elements.
+
+        Returns
+        -------
+        dict
+            Dictionary of updated test parameters after resampling.
+        """
+        if len(nobs) != 2 or len(counts) !=2:
+            raise ValueError('You must have 2 elements in each list')
+            
+        control_a, test_a = nobs
+        control_total, test_total = counts
+        control_b, test_b = control_total - control_a, test_total - test_a
+
+        np.random.seed(self.random_state)
+        
+        self.cr_control = control_a / control_total
+        self.cr_test = test_a / test_total
+        self.uplift = self._compute_uplift(self.cr_control,self.cr_test)
+        
+        if not isinstance(prior, (list,tuple)):
+            raise TypeError(f'You can use for prior only list or tuple. Passed {type(prior).__name__}')
+        elif not prior:
+            pr = (1,) * 4
+        elif len(prior) == 2:
+            pr = prior * 2
+        elif len(prior) in [1,3] or len(prior) > 4:
+            raise ValueError('You can pass only two or four values')
+        else:
+            pr = prior
+  
+        self.beta_control = np.random.beta(a=control_a+pr[0],b=control_b+pr[1],size=self.units_count)
+        self.beta_test = np.random.beta(a=test_a+pr[2],b=test_b+pr[3],size=self.units_count)  
+        self.uplift_dist = self._compute_uplift(self.beta_control, self.beta_test)
+        self.uplift_ci = self._compute_ci(self._compute_uplift(self.beta_control, self.beta_test)).tolist()
+        return self.get_test_parameters()
+        
+    def compute(self, two_sided=False, readable=False):
+        """
+        Calculates statistical significance and other metrics.
+
+        Parameters
+        ----------
+        two_sided : bool, default=False
+            Determines if the test is two-sided. If False, a one-sided test is performed.
+        readable : bool, default=False
+            If True, prints the results in a readable format.
+
+        Returns
+        -------
+        dict
+            Dictionary of computed metrics, including significance information, uplift, control loss, and test loss.
+        """
+        proba = np.mean(self.beta_test > self.beta_control)
+        control_loss = np.mean(np.maximum(self.uplift_dist, 0)) #uplift_loss_c
+        test_loss = np.mean(np.maximum(self._compute_uplift(self.beta_test, self.beta_control),0)) #uplift_loss_t
+        
+        if not two_sided:
+            significance_info = 'proba'
+            significance_result = value
+        else:
+            significance_info = 'pvalue'
+            significance_result = min(2*proba,2-2*proba)
+            
+        result = {
+            significance_info: significance_result, 
+            'uplift': self.uplift, 
+            f'uplift_ci': self.uplift_ci, 
+            'control_loss': control_loss, 
+            'test_loss': test_loss
+        }
+        
+        if not readable:
+            return result
+        else:
+            for k,i in result.items():
+                if k not in ['pvalue', 'uplift_ci']:
+                    print('{}: {:.3%}'.format(k,i))
+                elif k == 'uplift_ci':
+                    i = list(map(lambda x: '{:.3%}'.format(x),i))
+                    print(f'{k}: {i}')
+                else:
+                    print(f'{k}: {i}')
+                
+    def get_charts(self, figsize=(22,6), bins=50):
+        """
+        Calculates statistical significance and other metrics.
+
+        Parameters
+        ----------
+        two_sided : bool, default=False
+            Determines if the test is two-sided. If False, a one-sided test is performed.
+        readable : bool, default=False
+            If True, prints the results in a readable format.
+
+        Returns
+        -------
+        dict
+            Dictionary of computed metrics, including significance information, uplift, control loss, and test loss.
+        """
+        plt.figure(figsize=figsize)
+        
+        self._metric_distributions_chart(control_metric=self.beta_control, 
+                                         test_metric=self.beta_test, 
+                                         subplot=(1,3,1), 
+                                         title='Beta Distributions for CR', 
+                                         bins=bins)
+        
+        plt.subplot(1,3,2)
+        sns.histplot(x=self.beta_control,y=self.beta_test,bins=bins, color='#3366CC')
+        plt.xlabel('control')
+        plt.ylabel('test')
+        min_xy, max_xy = np.min([self.beta_control, self.beta_test]), np.max([self.beta_control, self.beta_test])
+        plt.axline(xy1=[min_xy, min_xy], xy2=[max_xy,max_xy], color='black', linestyle='--')
+        plt.title('Joint Distribution')
+        
+        self._uplift_distribtuion_chart(uplift_distribution=self.uplift_dist, 
+                                        uplift=self.uplift, 
+                                        sublot=(1,3,3), 
+                                        bins=bins)
+        plt.show()
+
+
+class Bootstrap(ParentTestInterface):
+    """
+    Bootstrap class for conducting statistical tests using bootstrapping.
+
+    This class extends ParentTestInterface, providing a resampling method
+    to estimate the distribution of a statistic by randomly sampling with replacement.
+
+    Parameters
+    ----------
+    confidence_level : float, default=0.95
+        The confidence level for calculating confidence intervals.
+    units_count : int, default=10000
+        The number of resampling iterations to perform.
+    random_state : int, optional
+        The seed for the random number generator to ensure reproducibility.
+    func : function, default=np.mean
+        The statistical function to apply to the samples. Used only when ratio=False in resample method.
+    **func_params : dict
+        Additional parameters to pass to the statistical function. Used only when ratio=False in resample method.
+    """
+    
+    def __init__(self, confidence_level=0.95, units_count=10_000, random_state=None, func=np.mean, **func_params):
+        """
+        Constructor for the Bootstrap class.
+        """
+        self.func = func
+        self.func_params = func_params
+        super().__init__(confidence_level=confidence_level, units_count=units_count, random_state=random_state)
+
+    def resample(self, *samples, ind=True, ratio=False, progress_bar=False):
+        """
+        Performs the resampling process on the given samples.
+
+        Parameters
+        ----------
+        *samples : array-like
+            The samples to be resampled.
+        ind : bool, default=True
+            Whether the samples are independent.
+        ratio : bool, default=False
+            Whether to perform test for ratio metric type. If True, `func` and `func_params` are not used.
+        progress_bar : bool, default=False
+            Whether to display a progress bar during resampling.
+
+        Returns
+        -------
+        dict
+            A dictionary containing the test parameters after resampling.
+        """
+        np.random.seed(self.random_state)
+        rng = tqdm(range(self.units_count)) if progress_bar else range(self.units_count)
+
+        def _generate_indices(size, high_a, high_b, ind):
+            a = np.random.randint(low=0, high=high_a, size=size)
+            if not ind:
+                return a, a
+            else:
+                b = np.random.randint(low=0, high=high_b, size=size)
+                return a, b
+
+        def _rel_size_comrarison(size_a, size_b):
+            if not ind and size_a != size_b:
+                raise ValueError('Relative samples must be same sample size')
+
+        if not ratio:
+            if len(samples) != 2:
+                raise ValueError('For non ratio metrics you must pass two samples')
+            else:
+                sample_a, sample_b = np.asarray(samples[0]), np.asarray(samples[1])
+                size_a, size_b = sample_a.shape[0], sample_b.shape[0]
+                max_size = max(size_a, size_b)
+                _rel_size_comrarison(size_a, size_b)
+                self.uplift = self._compute_uplift(self.func(sample_a, **self.func_params),
+                                                 self.func(sample_b, **self.func_params))
+                resample_data = []
+                for i in rng:
+                    ids_a, ids_b = _generate_indices(size=max_size, high_a=size_a, high_b=size_b, ind=ind)
+                    resample_data.append(
+                        [self.func(sample_a[ids_a], **self.func_params), 
+                         self.func(sample_b[ids_b], **self.func_params)])
+        else:
+            if len(samples) != 4:
+                raise ValueError(
+                            'For ratio metrics you must pass four samples: numerator and denominator for control and treatment groups')
+            numerator_a, denominator_a = np.asarray(samples[0]), np.asarray(samples[1])
+            numerator_b, denominator_b = np.asarray(samples[2]), np.asarray(samples[3])
+            size_a, size_b = numerator_a.shape[0], numerator_b.shape[0]
+            max_size = max(size_a, size_b)
+            _rel_size_comrarison(size_a, size_b)
+            self.uplift = self._compute_uplift(np.sum(numerator_a) / np.sum(denominator_a),
+                                             np.sum(numerator_b) / np.sum(denominator_b))
+            resample_data = []
+            for i in rng:
+                ids_a, ids_b = _generate_indices(size=max_size, high_a=size_a, high_b=size_b, ind=ind)
+                resample_data.append([np.sum(numerator_a[ids_a]) / np.sum(denominator_a[ids_a]),
+                                       np.sum(numerator_b[ids_b]) / np.sum(denominator_b[ids_b])])
+
+        self._resample_data = np.array(resample_data)
+        self.diffs = self._resample_data[:, 1] - self._resample_data[:, 0]
+        self.a_ci = self._compute_ci(self._resample_data[:, 0])
+        self.b_ci = self._compute_ci(self._resample_data[:, 1])
+        self.diff_ci = self._compute_ci(self.diffs)
+        self.uplift_dist = self._compute_uplift(self._resample_data[:, 0], self._resample_data[:, 1])
+        self.uplift_ci = self._compute_ci(self.uplift)
+        return self.get_test_parameters()
+
+    def compute(self, two_sided=True, readable=False):
+        """
+        Computes the statistical significance and other metrics.
+
+        Parameters
+        ----------
+        two_sided : bool, default=True
+            Whether to perform a two-sided test.
+        readable : bool, default=False
+            Whether to print results in a human-readable format.
+
+        Returns
+        -------
+        dict
+            A dictionary of computed metrics.
+        """
+        p = np.mean(self._resample_data[:, 1] > self._resample_data[:, 0])
+        pvalue = min(p * 2, 2 - p * 2)
+        
+        if not two_sided:
+            pvalue = p
+        result = {
+            'pvalue': pvalue,
+            'uplift': self.uplift,
+            'uplift_ci': self.uplift_ci,
+            'control_ci':self.a_ci,
+            'test_ci':self.b_ci,
+            'diff_ci': self.diff_ci
+        }
+        if not readable:
+            return result
+        else:
+            for k, i in result.items():
+                if k in 'uplift':
+                    print('{}: {:.3%}'.format(k, i))
+                elif k == 'uplift_ci':
+                    i = list(map(lambda x: '{:.3%}'.format(x), i))
+                    print(f'{k}: {i}')
+                else:
+                    print(f'{k}: {i}')
+
+    def get_charts(self, figsize=(22, 6), bins=50):
+        """
+        Generates and displays charts visualizing the resampling results.
+
+        Parameters
+        ----------
+        figsize : tuple of int, default=(22, 6)
+            The size of the figure to be displayed.
+        bins : int, default=50
+            The number of bins to use in the histograms.
+        """
+        plt.figure(figsize=figsize)
+        
+        self._metric_distributions_chart(control_metric=self._resample_data[:, 0],
+                                         test_metric=self._resample_data[:, 1],
+                                         subplot=(1,3,1), 
+                                         title=f'Distribution of {self.func.__name__}(s) for each group',
+                                         bins=bins)
+        
+        plt.subplot(1, 3, 2)
+        bar = sns.histplot(self.diffs, bins=bins, stat='probability', color='#DAA520')
+        plt.title(f'Distribution of {self.func.__name__}(s) differences (Test-Contol)')
+        
+        self._uplift_distribtuion_chart(uplift_distribution=self.uplift_dist, 
+                                        uplift=self.uplift, 
+                                        sublot=(1,3,3), 
+                                        bins=bins)
+        plt.show()
+
+class QuantileBootstrap(ParentTestInterface):
+    """
+    Efficient implementation of the quantile comparison method using bootstrap resampling,
+    as described in the Spotify Engineering article. This class is designed for large-scale 
+    A/B testing scenarios, where traditional bootstrap methods may be computationally intensive.
+    
+    Reference:
+    https://engineering.atspotify.com/2022/03/comparing-quantiles-at-scale-in-online-a-b-testing/
+
+    Parameters
+    ----------
+    q : float, default=0.5
+        The target quantile for comparison between samples.
+    confidence_level : float, default=0.95
+        The confidence level for calculating confidence intervals.
+    units_count : int, default=100000
+        The number of bootstrap samples to generate.
+    random_state : int, optional
+        The seed for the random number generator to ensure reproducibility.
+    """
+    def __init__(self, q=0.5, confidence_level=0.95, units_count=100_000, random_state=None):
+        """
+        Constructor for the QuantileBootstrap class.
+        """
+        self.q = q
+        super().__init__(confidence_level=confidence_level, units_count=units_count, random_state=random_state)
+    
+    def resample(self, *samples):
+        """
+        Performs resampling to estimate the quantile distribution.
+
+        This method applies a Poisson bootstrap algorithm to resample the provided datasets
+        and estimate the distribution of the specified quantile, allowing for comparison between
+        the two samples. It raises a ValueError if exactly two samples are not provided.
+
+        Parameters
+        ----------
+        *samples : array-like
+            The samples to be resampled for quantile comparison.
+        """
+        if len(samples) != 2:
+            raise ValueError('For non ratio metrics you must pass two samples')
+            
+        np.random.seed(self.random_state)
+        
+        sample_a, sample_b = np.sort(np.asarray(samples[0])), np.sort(np.asarray(samples[1]))
+        self.resample_a = sample_a[np.random.binomial(p=self.q,n=sample_a.shape[0]+1, size=self.units_count)]
+        self.resample_b = sample_b[np.random.binomial(p=self.q,n=sample_b.shape[0]+1, size=self.units_count)]
+    
+        self.uplift = self._compute_uplift(*np.quantile(a=[sample_a, sample_b], q=self.q, axis=1))
+        self.diffs = self.resample_b - self.resample_a
+        self.a_ci = self._compute_ci(self.resample_a)
+        self.b_ci = self._compute_ci(self.resample_b)
+        self.diff_ci = self._compute_ci(self.diffs)
+        self.uplift_dist = self._compute_uplift(self.resample_a, self.resample_b)
+        self.uplift_ci = self._compute_ci(self.uplift_dist)
+        return self.get_test_parameters()
+    
+    def compute(self, two_sided=True, readable=False):
+         """
+        Computes the statistical significance of the quantile comparison.
+
+        Parameters
+        ----------
+        two_sided : bool, default=True
+            Whether to perform a two-sided test.
+        readable : bool, default=False
+            Whether to print the results in a human-readable format.
+        """
+        p = np.mean(self.resample_b > self.resample_a)
+        pvalue = min(p * 2, 2 - p * 2)
+        
+        if not two_sided:
+            pvalue = p
+        result = {
+            'pvalue': pvalue,
+            'uplift': self.uplift,
+            'uplift_ci': self.uplift_ci,
+            'control_ci':self.a_ci,
+            'test_ci':self.b_ci,
+            'diff_ci': self.diff_ci
+        }
+        if not readable:
+            return result
+        else:
+            for k, i in result.items():
+                if k in 'uplift':
+                    print('{}: {:.3%}'.format(k, i))
+                elif k == 'uplift_ci':
+                    i = list(map(lambda x: '{:.3%}'.format(x), i))
+                    print(f'{k}: {i}')
+                else:
+                    print(f'{k}: {i}')
+        
+    def get_charts(self, figsize=(22, 6), bins=50):
+        """
+        Generates and displays charts visualizing the resampling results.
+
+        Parameters
+        ----------
+        figsize : tuple of int, default=(22, 6)
+            The size of the figure to be displayed.
+        bins : int, default=50
+            The number of bins to use in the histograms.
+        """
+        plt.figure(figsize=figsize)
+        
+        self._metric_distributions_chart(control_metric=self.resample_a,
+                                         test_metric=self.resample_b,
+                                         subplot=(1,3,1), 
+                                         title=f'Distribution of q {self.q} for each group',
+                                         bins=bins)
+        
+        plt.subplot(1, 3, 2)
+        bar = sns.histplot(self.diffs, bins=bins, stat='probability', color='#DAA520')
+        plt.title(f'Distribution of q {self.q} differences (Test-Contol)')
+        
+        self._uplift_distribtuion_chart(uplift_distribution=self.uplift_dist, 
+                                        uplift=self.uplift, 
+                                        sublot=(1,3,3), 
+                                        bins=bins)
+        plt.show()  
+
+
+class ParametricResamplingTest(ParentTestInterface):
+    """
+    A class for performing parametric resampling tests in A/B testing. This class 
+    assumes normal distribution of test statistics and simulates resampling using 
+    parametric techniques, making it more efficient for large datasets.
+
+    Inherits from ParentTestInterface to leverage common A/B testing functionalities.
+
+    Parameters
+    ----------
+    confidence_level : float, default=0.95
+        The confidence level for calculating confidence intervals.
+    units_count : int, default=100000
+        The number of resampling iterations to perform.
+    random_state : int, optional
+        The seed for the random number generator to ensure reproducibility.
+    """
+    def __init__(self, confidence_level=0.95, units_count=100_000, random_state=None):
+        """
+        Constructor for the ParametricResamplingTest class.
+        """
+        super().__init__(confidence_level=confidence_level, units_count=units_count, random_state=random_state)
+        
+    def resample(self, mean, std, n):
+        """
+        Performs the resampling process based on provided means, standard deviations, and sample sizes.
+
+        Parameters
+        ----------
+        mean : list of float, length=2
+            The means of the two samples to be compared.
+        std : list of float, length=2
+            The standard deviations of the two samples.
+        n : list of int, length=2
+            The sample sizes of the two groups.
+
+        Raises
+        ------
+        ValueError
+            If the length of any of the input lists is not equal to 2.
+        """
+        if len(mean) != 2 or len(std) != 2 or len(n) != 2:
+            raise ValueError('Len of all collections must be equal to 2')
+    
+        mean, std, n = np.asarray(mean),np.asarray(std),np.asarray(n)
+        sem = std / n**.5
+        self.delta_mean = mean[1]-mean[0]
+        self.delta_sem = (sem[0]**2+sem[1]**2)**.5
+        
+        np.random.seed(self.random_state)
+        
+        self.resample_a = np.random.normal(mean[0],sem[0], size=self.units_count)
+        self.resample_b = np.random.normal(mean[1],sem[1], size=self.units_count)
+        
+        self.uplift = self._compute_uplift(mean[0],mean[1])
+        self.diffs = self.resample_b - self.resample_a
+        self.a_ci = self._compute_ci(self.resample_a)
+        self.b_ci = self._compute_ci(self.resample_b)
+        self.diff_ci = self._compute_ci(self.diffs)
+        self.uplift_dist = self._compute_uplift(self.resample_a, self.resample_b)
+        self.uplift_ci = self._compute_ci(self.uplift_dist)
+        return self.get_test_parameters()
+            
+    def compute(self, two_sided=True, readable=False):
+        """
+        Computes the statistical significance of the comparison.
+
+        Parameters
+        ----------
+        two_sided : bool, default=True
+            Whether to perform a two-sided test.
+        readable : bool, default=False
+            Whether to print results in a human-readable format.
+
+        Returns
+        -------
+        dict
+            A dictionary of computed metrics including p-value and uplift metrics.
+        """
+
+        p = st.norm.cdf(x=0,loc=self.delta_mean, scale=self.delta_sem)
+        pvalue = min(p * 2, 2 - p * 2)
+        
+        if not two_sided:
+            pvalue = p
+        result = {
+            'pvalue': pvalue,
+            'uplift': self.uplift,
+            'uplift_ci': self.uplift_ci,
+            'control_ci':self.a_ci,
+            'test_ci':self.b_ci,
+            'diff_ci': self.diff_ci
+        }
+        if not readable:
+            return result
+        else:
+            for k, i in result.items():
+                if k in 'uplift':
+                    print('{}: {:.3%}'.format(k, i))
+                elif k == 'uplift_ci':
+                    i = list(map(lambda x: '{:.3%}'.format(x), i))
+                    print(f'{k}: {i}')
+                else:
+                    print(f'{k}: {i}')       
+                    
+    def get_charts(self, figsize=(22, 6), bins=50):
+        """
+        Generates and displays charts for visualizing the resampling results.
+
+        Parameters
+        ----------
+        figsize : tuple of int, default=(22, 6)
+            The size of the figure to be displayed.
+        bins : int, default=50
+            The number of bins to use in the histograms.
+        """
+        plt.figure(figsize=figsize)
+        
+        self._metric_distributions_chart(control_metric=self.resample_a,
+                                         test_metric=self.resample_b,
+                                         subplot=(1,3,1), 
+                                         title=f'Distribution of Mean(s) for each group',
+                                         bins=bins)
+        
+        plt.subplot(1, 3, 2)
+        bar = sns.histplot(self.diffs, bins=bins, stat='probability', color='#DAA520')
+        plt.title(f'Distribution of Mean(s) differences (Test-Contol)')
+        
+        self._uplift_distribtuion_chart(uplift_distribution=self.uplift_dist, 
+                                        uplift=self.uplift, 
+                                        sublot=(1,3,3), 
+                                        bins=bins)
+        plt.show()
