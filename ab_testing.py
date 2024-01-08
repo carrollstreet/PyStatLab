@@ -96,20 +96,12 @@ class ParentTestInterface:
     
     def get_test_parameters(self):
         """
-        Calculates uplift, typically used for comparing metrics before and 
-        after the test.
-
-        Parameters
-        ----------
-        before : numeric
-            The metric value before the test or for the control group.
-        after : numeric
-            The metric value after the test or for the test group.
+        Retrieves initial test parameters or settings.
 
         Returns
         -------
-        numeric
-            Computed uplift value.
+        dict
+            Dictionary of initial test parameters.
         """
         return self.init_items
     
