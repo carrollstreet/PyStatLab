@@ -13,7 +13,7 @@ class ParentTestInterface:
     ----------
     confidence_level : float
         The confidence level for calculating confidence intervals.
-    units_count : int
+    n_resamples : int
         The number of simulations or units to be considered in the test.
     random_state : int
         The seed for the random number generator to ensure reproducibility.
@@ -21,11 +21,11 @@ class ParentTestInterface:
     
     init_items = {}
 
-    def __init__(self, confidence_level, units_count, random_state):
+    def __init__(self, confidence_level, n_resamples, random_state):
         """
         Constructor for the ParentTestInterface class.
         """
-        self.units_count = units_count
+        self.n_resamples = n_resamples
         self.random_state = random_state
         self.confidence_level = confidence_level
         self._compute_confidence_bounds()
@@ -185,17 +185,17 @@ class BayesBeta(ParentTestInterface):
     ----------
     confidence_level : float, default=0.95
         The confidence level for calculating confidence intervals.
-    units_count : int, default=100000
+    n_resamples : int, default=100000
         The number of simulations for generating distributions.
     random_state : int, optional
         The seed for the random number generator to ensure reproducibility.
     """
 
-    def __init__(self, confidence_level=0.95, units_count=100_000, random_state=None):
+    def __init__(self, confidence_level=0.95, n_resamples=100_000, random_state=None):
         """
         Constructor for the BayesBeta class.
         """
-        super().__init__(confidence_level=confidence_level, units_count=units_count, random_state=random_state)
+        super().__init__(confidence_level=confidence_level, n_resamples=n_resamples, random_state=random_state)
             
     def resample(self, nobs, counts, prior=()):
         """
@@ -239,8 +239,8 @@ class BayesBeta(ParentTestInterface):
         else:
             pr = prior
   
-        self.beta_control = np.random.beta(a=control_a+pr[0],b=control_b+pr[1],size=self.units_count)
-        self.beta_test = np.random.beta(a=test_a+pr[2],b=test_b+pr[3],size=self.units_count)  
+        self.beta_control = np.random.beta(a=control_a+pr[0],b=control_b+pr[1],size=self.n_resamples)
+        self.beta_test = np.random.beta(a=test_a+pr[2],b=test_b+pr[3],size=self.n_resamples)  
         self.uplift_dist = self._compute_uplift(self.beta_control, self.beta_test)
         self.uplift_ci = self._compute_ci(self._compute_uplift(self.beta_control, self.beta_test)).tolist()
         return self.get_test_parameters()
@@ -342,7 +342,7 @@ class Bootstrap(ParentTestInterface):
     ----------
     confidence_level : float, default=0.95
         The confidence level for calculating confidence intervals.
-    units_count : int, default=10000
+    n_resamples : int, default=10000
         The number of resampling iterations to perform.
     random_state : int, optional
         The seed for the random number generator to ensure reproducibility.
@@ -352,13 +352,13 @@ class Bootstrap(ParentTestInterface):
         Additional parameters to pass to the statistical function. Used only when ratio=False in resample method.
     """
     
-    def __init__(self, confidence_level=0.95, units_count=10_000, random_state=None, func=np.mean, **func_params):
+    def __init__(self, confidence_level=0.95, n_resamples=10_000, random_state=None, func=np.mean, **func_params):
         """
         Constructor for the Bootstrap class.
         """
         self.func = func
         self.func_params = func_params
-        super().__init__(confidence_level=confidence_level, units_count=units_count, random_state=random_state)
+        super().__init__(confidence_level=confidence_level, n_resamples=n_resamples, random_state=random_state)
 
     def resample(self, *samples, ind=True, ratio=False, progress_bar=False):
         """
@@ -381,7 +381,7 @@ class Bootstrap(ParentTestInterface):
             A dictionary containing the test parameters after resampling.
         """
         np.random.seed(self.random_state)
-        rng = tqdm(range(self.units_count)) if progress_bar else range(self.units_count)
+        rng = tqdm(range(self.n_resamples)) if progress_bar else range(self.n_resamples)
 
         def _generate_indices(size, high_a, high_b, ind):
             a = np.random.randint(low=0, high=high_a, size=size)
@@ -522,17 +522,17 @@ class QuantileBootstrap(ParentTestInterface):
         The target quantile for comparison between samples.
     confidence_level : float, default=0.95
         The confidence level for calculating confidence intervals.
-    units_count : int, default=100000
+    n_resamples : int, default=100000
         The number of bootstrap samples to generate.
     random_state : int, optional
         The seed for the random number generator to ensure reproducibility.
     """
-    def __init__(self, q=0.5, confidence_level=0.95, units_count=100_000, random_state=None):
+    def __init__(self, q=0.5, confidence_level=0.95, n_resamples=100_000, random_state=None):
         """
         Constructor for the QuantileBootstrap class.
         """
         self.q = q
-        super().__init__(confidence_level=confidence_level, units_count=units_count, random_state=random_state)
+        super().__init__(confidence_level=confidence_level, n_resamples=n_resamples, random_state=random_state)
     
     def resample(self, *samples):
         """
@@ -553,8 +553,8 @@ class QuantileBootstrap(ParentTestInterface):
         np.random.seed(self.random_state)
         
         sample_a, sample_b = np.sort(np.asarray(samples[0])), np.sort(np.asarray(samples[1]))
-        self.resample_a = sample_a[np.random.binomial(p=self.q,n=sample_a.shape[0]+1, size=self.units_count)]
-        self.resample_b = sample_b[np.random.binomial(p=self.q,n=sample_b.shape[0]+1, size=self.units_count)]
+        self.resample_a = sample_a[np.random.binomial(p=self.q,n=sample_a.shape[0]+1, size=self.n_resamples)]
+        self.resample_b = sample_b[np.random.binomial(p=self.q,n=sample_b.shape[0]+1, size=self.n_resamples)]
     
         self.uplift = self._compute_uplift(*np.quantile(a=[sample_a, sample_b], q=self.q, axis=1))
         self.diffs = self.resample_b - self.resample_a
@@ -643,16 +643,16 @@ class ParametricResamplingTest(ParentTestInterface):
     ----------
     confidence_level : float, default=0.95
         The confidence level for calculating confidence intervals.
-    units_count : int, default=100000
+    n_resamples : int, default=100000
         The number of resampling iterations to perform.
     random_state : int, optional
         The seed for the random number generator to ensure reproducibility.
     """
-    def __init__(self, confidence_level=0.95, units_count=100_000, random_state=None):
+    def __init__(self, confidence_level=0.95, n_resamples=100_000, random_state=None):
         """
         Constructor for the ParametricResamplingTest class.
         """
-        super().__init__(confidence_level=confidence_level, units_count=units_count, random_state=random_state)
+        super().__init__(confidence_level=confidence_level, n_resamples=n_resamples, random_state=random_state)
         
     def resample(self, mean, std, n):
         """
@@ -682,8 +682,8 @@ class ParametricResamplingTest(ParentTestInterface):
         
         np.random.seed(self.random_state)
         
-        self.resample_a = np.random.normal(mean[0],sem[0], size=self.units_count)
-        self.resample_b = np.random.normal(mean[1],sem[1], size=self.units_count)
+        self.resample_a = np.random.normal(mean[0],sem[0], size=self.n_resamples)
+        self.resample_b = np.random.normal(mean[1],sem[1], size=self.n_resamples)
         
         self.uplift = self._compute_uplift(mean[0],mean[1])
         self.diffs = self.resample_b - self.resample_a
