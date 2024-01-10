@@ -548,7 +548,7 @@ class QuantileBootstrap(ParentTestInterface):
             The samples to be resampled for quantile comparison.
         """
         if len(samples) != 2:
-            raise ValueError('For non ratio metrics you must pass two samples')
+            raise ValueError('You must pass only two samples')
             
         np.random.seed(self.random_state)
         
@@ -764,3 +764,77 @@ class ParametricResamplingTest(ParentTestInterface):
                                         sublot=(1,3,3), 
                                         bins=bins)
         plt.show()
+
+
+def permutation_ind(*samples,
+                    n_resamples=10000,
+                    two_sided=True, 
+                    confidence_level=0.95,
+                    random_state=None, 
+                    progress_bar=False, 
+                    func=np.mean, 
+                    **func_params):
+    """
+    Performs an independent two-sample permutation test.
+
+    This test is used to determine if there is a significant difference between 
+    the means of two independent samples. It is robust against non-normal 
+    distributions and is not influenced by outliers.
+
+    Parameters
+    ----------
+    samples : tuple of array-like
+        The two samples to compare.
+    n_resamples : int, default=10000
+        Number of permutations to perform.
+    two_sided : bool, default=True
+        Perform a two-sided test. If False, perform a one-sided test.
+    confidence_level : float, default=0.95
+        Confidence level for computing the confidence interval of the difference.
+    random_state : int, optional
+        Seed for the random number generator.
+    progress_bar : bool, default=False
+        Display a progress bar during computation.
+    func : function, default=np.mean
+        Function used to compute the test statistic (e.g., np.mean, np.median).
+    **func_params : dict
+        Additional parameters for the test statistic function.
+
+    Returns
+    -------
+    dict
+        A dictionary containing the p-value, observed difference, uplift,
+        and confidence interval of the permutation differences.
+
+    Raises
+    ------
+    ValueError
+        If the number of samples provided is not equal to 2.
+    """
+    if len(samples) != 2:
+        raise ValueError('You must pass only two samples')
+        
+    sample_a, sample_b = np.asarray(samples[0]), np.asarray(samples[1]) 
+    size_a = sample_a.shape[0]
+    observed_diff = func(sample_b) - func(sample_a)
+    combined = np.concatenate((sample_a, sample_b))
+    uplift = observed_diff / func(sample_a)
+    left_quant, right_quant =  (1 - confidence_level) / 2, 1 - (1 - confidence_level) / 2
+
+    np.random.seed(random_state)
+
+    diff_lst = []
+    rng = tqdm(range(n_resamples)) if progress_bar else range(n_resamples)
+    for _ in rng:
+        np.random.shuffle(combined)
+        perm_sample_a = combined[:size_a]
+        perm_sample_b = combined[size_a:]
+        perm_diff = np.mean(perm_sample_b) - np.mean(perm_sample_a)
+        diff_lst.append(perm_diff)
+
+    diff_lst = np.array(diff_lst)
+    p = np.mean(observed_diff > diff_lst)
+    pvalue = min(2 * p, 2-2 * p)
+    pvalue = p if not two_sided else pvalue
+    permutation_diff_ci = np.quantile(diff_lst, q=[left_quant, right_quant])
+    return {'pvalue': pvalue, 'uplift': uplift, 'observed_diff': observed_diff, 'permutation_diff_ci': permutation_diff_ci}
