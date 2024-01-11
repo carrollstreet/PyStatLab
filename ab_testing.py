@@ -841,3 +841,37 @@ def permutation_ind(*samples,
     pvalue = p if not two_sided else pvalue
     permutation_diff_ci = np.quantile(diff_lst, q=[left_quant, right_quant])
     return {'pvalue': pvalue, 'uplift': uplift, 'observed_diff': observed_diff, 'permutation_diff_ci': permutation_diff_ci}
+
+
+def g_squared(contingency_table):
+    """
+    Calculates the G-squared (log-likelihood ratio) statistic and its p-value for a given contingency table.
+
+    This function is used to test the independence of two categorical variables represented in the contingency table. 
+    It is an alternative to the chi-squared test and is particularly useful for large sample sizes or when the data 
+    is sparse.
+
+    Parameters
+    ----------
+    contingency_table : array-like
+        A two-dimensional array-like structure representing the contingency table. Rows represent one categorical variable, 
+        and columns represent another categorical variable.
+
+    Returns
+    -------
+    dict
+        A dictionary with two keys:
+        - 'pvalue': The p-value for the G-squared statistic, indicating the probability of observing the data if the null 
+          hypothesis of independence is true.
+        - 'g_squared': The computed G-squared statistic, a measure of divergence between the observed and expected frequencies.
+
+    Notes
+    -----
+    The function first converts the input table to a NumPy array. It then computes the expected frequencies and degrees of 
+    freedom using chi-squared contingency analysis. The G-squared statistic is calculated, followed by its p-value using 
+    the survival function of the chi-squared distribution.
+    """
+    ct = np.asarray(contingency_table)
+    _, _, dof,exp_freq = st.chi2_contingency(ct)
+    g_squared = 2 * np.sum(ct * np.log(ct/exp_freq))
+    return {'pvalue': st.chi2.sf(g_squared,dof), 'g_squared': g_squared}
