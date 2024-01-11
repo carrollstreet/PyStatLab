@@ -245,7 +245,7 @@ class BayesBeta(ParentTestInterface):
         self.beta_control = np.random.beta(a=control_a+pr[0],b=control_b+pr[1],size=self.n_resamples)
         self.beta_test = np.random.beta(a=test_a+pr[2],b=test_b+pr[3],size=self.n_resamples)  
         self.uplift_dist = self._compute_uplift(self.beta_control, self.beta_test)
-        self.uplift_ci = self._compute_ci(self._compute_uplift(self.beta_control, self.beta_test)).tolist()
+        self.uplift_ci = self._compute_ci(self.uplift_dist)
         return self.get_test_parameters()
         
     def compute(self, two_sided=False, readable=False):
@@ -437,7 +437,7 @@ class Bootstrap(ParentTestInterface):
         self.b_ci = self._compute_ci(self._resample_data[:, 1])
         self.diff_ci = self._compute_ci(self.diffs)
         self.uplift_dist = self._compute_uplift(self._resample_data[:, 0], self._resample_data[:, 1])
-        self.uplift_ci = self._compute_ci(self.uplift)
+        self.uplift_ci = self._compute_ci(self.uplift_dist)
         return self.get_test_parameters()
 
     def compute(self, two_sided=True, readable=False):
