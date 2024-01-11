@@ -770,9 +770,9 @@ class ParametricResamplingTest(ParentTestInterface):
 
 
 def permutation_ind(*samples,
+                    confidence_level=0.95,
                     n_resamples=10000,
                     two_sided=True, 
-                    confidence_level=0.95,
                     random_state=None, 
                     progress_bar=False, 
                     func=np.mean, 
@@ -788,12 +788,12 @@ def permutation_ind(*samples,
     ----------
     samples : tuple of array-like
         The two samples to compare.
+    confidence_level : float, default=0.95
+        Confidence level for computing the confidence interval of the difference.
     n_resamples : int, default=10000
         Number of permutations to perform.
     two_sided : bool, default=True
         Perform a two-sided test. If False, perform a one-sided test.
-    confidence_level : float, default=0.95
-        Confidence level for computing the confidence interval of the difference.
     random_state : int, optional
         Seed for the random number generator.
     progress_bar : bool, default=False
