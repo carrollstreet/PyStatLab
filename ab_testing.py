@@ -74,8 +74,9 @@ class ParentTestInterface:
             Confidence intervals for the provided data.
         """
         return np.quantile(data, [self.left_quant, self.right_quant])
-        
-    def _compute_uplift(self, before, after):
+    
+    @staticmethod    
+    def _compute_uplift(before, after):
         """
         Calculates uplift, typically used for comparing metrics before and 
         after the test.
@@ -105,7 +106,8 @@ class ParentTestInterface:
         """
         return self.init_items
     
-    def _metric_distributions_chart(self, control_metric, test_metric, subplot, title, bins):
+    @staticmethod
+    def _metric_distributions_chart(control_metric, test_metric, subplot, title, bins):
         """
         Draws a histogram chart for the distributions of control and test metrics.
 
@@ -128,7 +130,8 @@ class ParentTestInterface:
         plt.title(title)
         plt.legend()
         
-    def _uplift_distribtuion_chart(self, uplift_distribution, uplift, sublot, bins):
+    @staticmethod    
+    def _uplift_distribtuion_chart(uplift_distribution, uplift, sublot, bins):
         """
         Draws a cumulative distribution chart for uplift.
 
@@ -566,7 +569,7 @@ class QuantileBootstrap(ParentTestInterface):
         return self.get_test_parameters()
     
     def compute(self, two_sided=True, readable=False):
-         """
+        """
         Computes the statistical significance of the quantile comparison.
 
         Parameters
