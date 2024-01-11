@@ -270,7 +270,7 @@ class BayesBeta(ParentTestInterface):
         
         if not two_sided:
             significance_info = 'proba'
-            significance_result = value
+            significance_result = proba
         else:
             significance_info = 'pvalue'
             significance_result = min(2*proba,2-2*proba)
