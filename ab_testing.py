@@ -859,3 +859,50 @@ def g_squared(contingency_table):
     _, _, dof,exp_freq = st.chi2_contingency(ct)
     g_squared = 2 * np.sum(ct * np.log(ct/exp_freq))
     return {'pvalue': st.chi2.sf(g_squared,dof), 'g_squared': g_squared}
+
+def ttest_confidence_interval(*samples, confidence_level=0.95) -> dict:
+    """
+    Calculates the confidence interval for the difference between means of two samples using a t-test.
+
+    This function computes the confidence interval for the difference in means (uplift) between two independent samples 
+    assuming equal variance. It's useful for understanding the range within which the true mean difference lies with 
+    a specified level of confidence.
+
+    Parameters
+    ----------
+    samples : tuple of array-like
+        The two samples for which the confidence interval of the difference between means is to be calculated.
+        Only two samples should be provided.
+    confidence_level : float, default=0.95
+        The confidence level for the interval. The default is 0.95, representing a 95% confidence level.
+
+    Returns
+    -------
+    dict
+        A dictionary containing:
+        - 'uplift_ci': The confidence interval for the relative uplift (percentage change) in mean from the first to 
+          the second sample.
+        - 'diff_ci': The absolute difference in means' confidence interval between the two samples.
+
+    Raises
+    ------
+    ValueError
+        If the number of samples provided is not equal to 2.
+
+    Notes
+    -----
+    The function assumes that the two samples have equal variances and are independent. It uses the Student's t-distribution 
+    to calculate the critical t-value and then computes the confidence interval for the difference in means.
+    """
+    if len(samples) != 2:
+        raise ValueError('You must pass only two samples')
+        
+    a, b = np.asarray(samples[0]), np.asarray(samples[1])
+    m_a, m_b = np.mean(a), np.mean(b)
+    std_a, std_b = np.std(a, ddof=1), np.std(b, ddof=1)
+    n_a, n_b = a.shape[0], b.shape[0]
+    t = st.t.ppf(1-(1-confidence_level) / 2, df = n_a + n_b - 2)
+    diff = m_b - m_a
+    lower = diff - t * (std_a**2 / n_a + std_b**2 / n_b)**.5
+    upper = diff + t * (std_a**2 / n_a + std_b**2 / n_b)**.5
+    return {'uplift_ci': [lower / m_a, upper / m_a], 'diff_ci':[lower,upper]}
