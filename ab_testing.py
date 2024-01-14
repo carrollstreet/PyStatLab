@@ -107,15 +107,59 @@ class ParentTestInterface:
         return self.init_items
     
     @staticmethod
-    def _metric_distributions_chart(control_metric, test_metric, subplot, title, bins):
+    def _get_alternative_value(p, two_sided):
+        """
+        Calculates p-value for two_sided tests.
+
+        Parameters
+        ----------
+        p : float
+            The original p-value.
+        two_sided : bool
+            A flag indicating if the test is two-sided.
+
+        Returns
+        -------
+        float
+            P-value based on the type of test.
+        """
+        pvalue = min(2*p,2-2*p)
+        return pvalue if two_sided else p
+    
+    @staticmethod    
+    def _get_readable_format(result_dict):
+        """
+        Prints the results in a human-readable format.
+
+        Parameters
+        ----------
+        result_dict : dict
+            A dictionary containing key statistical results.
+
+        Notes
+        -----
+        Formats and prints the results, such as p-values, confidence intervals, 
+        and uplift metrics, in a readable percentage format.
+        """
+        for k, i in result_dict.items():
+            if k in ('uplift','proba','test_loss', 'control_loss'):
+                print('{}: {:.3%}'.format(k,i))
+            elif k == 'uplift_ci':
+                i = list(map(lambda x: '{:.3%}'.format(x),i))
+                print(f'{k}: {i[0]} - {i[1]}')
+            else:
+                print(f'{k}: {i}')
+    
+    @staticmethod
+    def _metric_distributions_chart(control_metric, test_metric, title, bins):
         """
         Draws a histogram chart for the distributions of control and test metrics.
 
         Parameters
         ----------
-        control_metric : array-like
+        metric_a : array-like
             Data points for the control group.
-        test_metric : array-like
+        metric_b : array-like
             Data points for the test group.
         subplot : tuple
             The subplot configuration (nrows, ncols, index).
@@ -124,14 +168,13 @@ class ParentTestInterface:
         bins : int
             The number of bins for the histogram.
         """
-        plt.subplot(*subplot)
-        sns.histplot(control_metric, label='control', bins=bins, stat='probability', color='#19D3F3')
-        sns.histplot(test_metric, label='test',bins=bins, stat='probability', color='C1')
+        sns.histplot(control_metric, label='Control', bins=bins, stat='probability', color='#19D3F3')
+        sns.histplot(test_metric, label='Test',bins=bins, stat='probability', color='C1')
         plt.title(title)
         plt.legend()
         
     @staticmethod    
-    def _uplift_distribtuion_chart(uplift_distribution, uplift, sublot, bins):
+    def _uplift_distribtuion_chart(uplift_distribution, uplift, bins):
         """
         Draws a cumulative distribution chart for uplift.
 
@@ -146,7 +189,6 @@ class ParentTestInterface:
         bins : int
             The number of bins for the histogram.
         """
-        plt.subplot(*sublot)
         thresh = 0
         h = sns.histplot(x=uplift_distribution, bins=bins, stat='probability',cumulative=True, color='#636EFA')
         for i in h.patches:
@@ -264,36 +306,21 @@ class BayesBeta(ParentTestInterface):
         dict
             Dictionary of computed metrics, including significance information, uplift, control loss, and test loss.
         """
-        proba = np.mean(self.beta_test > self.beta_control)
         control_loss = np.mean(np.maximum(self.uplift_dist, 0)) #uplift_loss_c
         test_loss = np.mean(np.maximum(self._compute_uplift(self.beta_test, self.beta_control),0)) #uplift_loss_t
         
-        if not two_sided:
-            significance_info = 'proba'
-            significance_result = proba
-        else:
-            significance_info = 'pvalue'
-            significance_result = min(2*proba,2-2*proba)
+        p = self._get_alternative_value(p=np.mean(self.beta_test > self.beta_control), two_sided=two_sided)
+        significance_result = {'proba':p} if not two_sided else {'pvalue':p}
             
         result = {
-            significance_info: significance_result, 
+            **significance_result, 
             'uplift': self.uplift, 
             f'uplift_ci': self.uplift_ci, 
             'control_loss': control_loss, 
             'test_loss': test_loss
         }
         
-        if not readable:
-            return result
-        else:
-            for k,i in result.items():
-                if k not in ['pvalue', 'uplift_ci']:
-                    print('{}: {:.3%}'.format(k,i))
-                elif k == 'uplift_ci':
-                    i = list(map(lambda x: '{:.3%}'.format(x),i))
-                    print(f'{k}: {i}')
-                else:
-                    print(f'{k}: {i}')
+        return self._get_readable_format(result_dict=result) if readable else result
                 
     def get_charts(self, figsize=(22,6), bins=50):
         """
@@ -312,10 +339,9 @@ class BayesBeta(ParentTestInterface):
             Dictionary of computed metrics, including significance information, uplift, control loss, and test loss.
         """
         plt.figure(figsize=figsize)
-        
+        plt.subplot(1,3,1)
         self._metric_distributions_chart(control_metric=self.beta_control, 
                                          test_metric=self.beta_test, 
-                                         subplot=(1,3,1), 
                                          title='Beta Distributions for CR', 
                                          bins=bins)
         
@@ -326,10 +352,9 @@ class BayesBeta(ParentTestInterface):
         min_xy, max_xy = np.min([self.beta_control, self.beta_test]), np.max([self.beta_control, self.beta_test])
         plt.axline(xy1=[min_xy, min_xy], xy2=[max_xy,max_xy], color='black', linestyle='--')
         plt.title('Joint Distribution')
-        
+        plt.subplot(1,3,3)
         self._uplift_distribtuion_chart(uplift_distribution=self.uplift_dist, 
                                         uplift=self.uplift, 
-                                        sublot=(1,3,3), 
                                         bins=bins)
         plt.show()
 
@@ -456,11 +481,8 @@ class Bootstrap(ParentTestInterface):
         dict
             A dictionary of computed metrics.
         """
-        p = np.mean(self._resample_data[:, 1] > self._resample_data[:, 0])
-        pvalue = min(p * 2, 2 - p * 2)
-        
-        if not two_sided:
-            pvalue = p
+        pvalue = self._get_alternative_value(p=np.mean(self._resample_data[:, 1] > self._resample_data[:, 0]), two_sided=two_sided)
+
         result = {
             'pvalue': pvalue,
             'uplift': self.uplift,
@@ -469,17 +491,8 @@ class Bootstrap(ParentTestInterface):
             'test_ci':self.b_ci,
             'diff_ci': self.diff_ci
         }
-        if not readable:
-            return result
-        else:
-            for k, i in result.items():
-                if k in 'uplift':
-                    print('{}: {:.3%}'.format(k, i))
-                elif k == 'uplift_ci':
-                    i = list(map(lambda x: '{:.3%}'.format(x), i))
-                    print(f'{k}: {i}')
-                else:
-                    print(f'{k}: {i}')
+        
+        return self._get_readable_format(result_dict=result) if readable else result
 
     def get_charts(self, figsize=(22, 6), bins=50):
         """
@@ -493,20 +506,18 @@ class Bootstrap(ParentTestInterface):
             The number of bins to use in the histograms.
         """
         plt.figure(figsize=figsize)
-        
+        plt.subplot(1,3,1)
         self._metric_distributions_chart(control_metric=self._resample_data[:, 0],
                                          test_metric=self._resample_data[:, 1],
-                                         subplot=(1,3,1), 
                                          title=f'Distribution of {self.func.__name__}(s) for each group',
                                          bins=bins)
         
         plt.subplot(1, 3, 2)
         bar = sns.histplot(self.diffs, bins=bins, stat='probability', color='#DAA520')
-        plt.title(f'Distribution of {self.func.__name__}(s) differences (Test-Contol)')
-        
+        plt.title(f'Distribution of {self.func.__name__}(s) differences (Test-Control)')
+        plt.subplot(1,3,3)
         self._uplift_distribtuion_chart(uplift_distribution=self.uplift_dist, 
                                         uplift=self.uplift, 
-                                        sublot=(1,3,3), 
                                         bins=bins)
         plt.show()
 
@@ -579,11 +590,8 @@ class QuantileBootstrap(ParentTestInterface):
         readable : bool, default=False
             Whether to print the results in a human-readable format.
         """
-        p = np.mean(self.resample_b > self.resample_a)
-        pvalue = min(p * 2, 2 - p * 2)
+        pvalue = self._get_alternative_value(p=np.mean(self.resample_b > self.resample_a), two_sided=two_sided)
         
-        if not two_sided:
-            pvalue = p
         result = {
             'pvalue': pvalue,
             'uplift': self.uplift,
@@ -592,17 +600,8 @@ class QuantileBootstrap(ParentTestInterface):
             'test_ci':self.b_ci,
             'diff_ci': self.diff_ci
         }
-        if not readable:
-            return result
-        else:
-            for k, i in result.items():
-                if k in 'uplift':
-                    print('{}: {:.3%}'.format(k, i))
-                elif k == 'uplift_ci':
-                    i = list(map(lambda x: '{:.3%}'.format(x), i))
-                    print(f'{k}: {i}')
-                else:
-                    print(f'{k}: {i}')
+        
+        return self._get_readable_format(result_dict=result) if readable else result
         
     def get_charts(self, figsize=(22, 6), bins=50):
         """
@@ -616,20 +615,18 @@ class QuantileBootstrap(ParentTestInterface):
             The number of bins to use in the histograms.
         """
         plt.figure(figsize=figsize)
-        
+        plt.subplot(1,3,1)
         self._metric_distributions_chart(control_metric=self.resample_a,
                                          test_metric=self.resample_b,
-                                         subplot=(1,3,1), 
                                          title=f'Distribution of q {self.q} for each group',
                                          bins=bins)
         
         plt.subplot(1, 3, 2)
         bar = sns.histplot(self.diffs, bins=bins, stat='probability', color='#DAA520')
         plt.title(f'Distribution of q {self.q} differences (Test-Contol)')
-        
+        plt.subplot(1,3,3)
         self._uplift_distribtuion_chart(uplift_distribution=self.uplift_dist, 
                                         uplift=self.uplift, 
-                                        sublot=(1,3,3), 
                                         bins=bins)
         plt.show()  
 
@@ -715,10 +712,8 @@ class ParametricResamplingTest(ParentTestInterface):
         """
 
         p = st.norm.cdf(x=0,loc=self.delta_mean, scale=self.delta_sem)
-        pvalue = min(p * 2, 2 - p * 2)
+        pvalue = self._get_alternative_value(p=p, two_sided=two_sided)
         
-        if not two_sided:
-            pvalue = p
         result = {
             'pvalue': pvalue,
             'uplift': self.uplift,
@@ -727,17 +722,8 @@ class ParametricResamplingTest(ParentTestInterface):
             'test_ci':self.b_ci,
             'diff_ci': self.diff_ci
         }
-        if not readable:
-            return result
-        else:
-            for k, i in result.items():
-                if k in 'uplift':
-                    print('{}: {:.3%}'.format(k, i))
-                elif k == 'uplift_ci':
-                    i = list(map(lambda x: '{:.3%}'.format(x), i))
-                    print(f'{k}: {i}')
-                else:
-                    print(f'{k}: {i}')       
+        
+        return self._get_readable_format(result_dict=result) if readable else result
                     
     def get_charts(self, figsize=(22, 6), bins=50):
         """
@@ -751,20 +737,18 @@ class ParametricResamplingTest(ParentTestInterface):
             The number of bins to use in the histograms.
         """
         plt.figure(figsize=figsize)
-        
+        plt.subplot(1,3,1)
         self._metric_distributions_chart(control_metric=self.resample_a,
                                          test_metric=self.resample_b,
-                                         subplot=(1,3,1), 
                                          title=f'Distribution of Mean(s) for each group',
                                          bins=bins)
         
         plt.subplot(1, 3, 2)
         bar = sns.histplot(self.diffs, bins=bins, stat='probability', color='#DAA520')
-        plt.title(f'Distribution of Mean(s) differences (Test-Contol)')
-        
+        plt.title(f'Distribution of Mean(s) differences (Test-Control)')
+        plt.subplot(1,3,3)
         self._uplift_distribtuion_chart(uplift_distribution=self.uplift_dist, 
                                         uplift=self.uplift, 
-                                        sublot=(1,3,3), 
                                         bins=bins)
         plt.show()
 
