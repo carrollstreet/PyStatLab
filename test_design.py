@@ -568,3 +568,31 @@ class TestAnalyzer:
         plt.title('P-values Distribution Estimate')
         plt.ylabel('p-value')
         plt.show()
+
+def fwer(n_comparison, alpha=0.05):
+    """
+    Calculates the family-wise error rate (FWER) for multiple hypothesis testing.
+
+    The function computes the probability of making one or more false discoveries (Type I errors) among all 
+    the hypotheses when performing multiple comparisons.
+
+    Parameters
+    ----------
+    n_comparison : int
+        The number of independent hypothesis tests being performed.
+    alpha : float, optional
+        The significance level for a single comparison (default is 0.05).
+
+    Returns
+    -------
+    float
+        The calculated FWER, representing the probability of at least one false discovery among all the tests.
+
+    Notes
+    -----
+    FWER is an important measure in multiple testing to control the overall error rate. This function uses the 
+    simple Bonferroni correction method, which assumes independent or positively dependent tests. The Bonferroni 
+    method is conservative, meaning it might reduce the power of tests (increasing Type II errors) in an effort 
+    to control for Type I errors.
+    """
+    return 1 - (1 - alpha) ** n_comparison
