@@ -432,40 +432,31 @@ class TestAnalyzer:
         Seed for the random number generator.
     alpha : float
         Significance level for hypothesis testing.
-    test_func : callable
+    func : callable
         The statistical test function to apply on each resample.
-    test_func_params : dict
-        Parameters to pass to the test function.
-    statistic : callable
-        The statistic to compute on each resample.
-    statistic_params : dict
-        Parameters to pass to the statistic function.
 
     Methods
     -------
-    resample(sample, samples_ratio=0.5, progress_bar=True)
+    resample(sample, progress_bar=True)
         Performs resampling on the provided sample and applies the test function to assess its suitability.
     compute_fpr(weighted=False)
         Computes the false positive rate (FPR) from the stored p-values, indicating test suitability.
     perform_chisquare(bins=None)
         Performs a chi-square test to evaluate the uniformity of the p-values distribution.
-    get_charts(figsize=(22,6), bins=20)
-        Generates and displays charts for the test statistics and p-values, providing visual assessment of test suitability.
+    get_charts(figsize=(8,6))
+        Generates and displays chart for the test statistics and p-values, providing visual assessment of test suitability.
     """
     
-    def __init__(self, test_func, test_func_params={}, statistic=np.mean, statisctic_params={}, alpha=0.05, n_resamples=10_000, random_state=None):
+    def __init__(self, func, alpha=0.05, n_resamples=10_000, random_state=None):
         """
         Constructor for DurationEstimatorInterface.
         """
+        self.func = func
         self.n_resamples = n_resamples
         self.random_state = random_state
         self.alpha = alpha
-        self.test_func = test_func
-        self.test_func_params = test_func_params
-        self.statistic = statistic
-        self.statisctic_params = statisctic_params
         
-    def resample(self, sample, samples_ratio=0.5, progress_bar=True):
+    def resample(self, sample, progress_bar=True):
         """
         Performs resampling on the provided sample for suitability analysis of the test function.
 
@@ -473,8 +464,6 @@ class TestAnalyzer:
         ----------
         sample : array-like
             The data sample representing the distribution for the analysis.
-        samples_ratio : float, default=0.5
-            The ratio of the sample size for each resampling iteration.
         progress_bar : bool, default=True
             Whether to display a progress bar during resampling.
 
@@ -488,16 +477,14 @@ class TestAnalyzer:
         np.random.seed(self.random_state)
         sample = np.asarray(sample)
         pvalues = []
-        self.statistic_values = []
         size = sample.shape[0]
-        size_per_sample = int(samples_ratio * size)
+        size_per_sample = int(size / 2)
         rng = tqdm(range(self.n_resamples)) if progress_bar else range(self.n_resamples)
         for i in rng:
                 resampled_data = np.random.choice(sample, size=size, replace=True)
                 a,b = resampled_data[:size_per_sample], resampled_data[size_per_sample:] 
-                stat_result = self.test_func(a,b, **self.test_func_params)
+                stat_result = self.func(a,b)
                 pvalues.append(stat_result)
-                self.statistic_values.append(self.statistic(a-b, **self.statisctic_params))
         self.pvalues = np.array(pvalues)
         
     def compute_fpr(self, weighted=False):
@@ -541,33 +528,25 @@ class TestAnalyzer:
             bins = 20 if len_ > 20 else len_
         return st.chisquare(np.histogram(self.pvalues, bins=bins)[0])
     
-    def get_charts(self, figsize=(22,6), bins=20):
+    def get_charts(self, figsize=(8,6)):
         """
-        Generates and displays charts for the distribution of test statistics and p-values.
+        Generates and displays chart for the distribution of test p-values.
 
         Parameters
         ----------
-        figsize : tuple, default=(22, 6)
+        figsize : tuple, default=(8, 6)
             Size of the figure to display.
         bins : int, default=20
             The number of bins for the histogram.
         """
-        plt.figure(figsize=figsize)
-        plt.subplot(1,3,1)
-        sns.histplot(self.statistic_values, bins=bins, color='#19D3F3', stat='density', 
-                     label=f'AVG: {round(np.mean(self.statistic_values),3)}\nSTD: {round(np.std(self.statistic_values),3)}')
-        plt.legend()
-        plt.title('Statistic Differences Distribution')
-        plt.subplot(1,3,2)
-        st.probplot(self.statistic_values, dist="norm", plot=plt)
-        plt.title('Probability Plot for Normal Distribution')
-        plt.subplot(1,3,3)
-        plt.plot([0, 1], [0, 1], linestyle='dashed', color='black', linewidth=2)
-        plt.vlines(x=0.05,ymin=0,ymax=1,linestyle='dotted', color='black', linewidth=2) 
-        plt.plot(np.array(sorted(self.pvalues)), np.array(sorted(np.linspace(0,1,self.n_resamples))))
-        plt.title('P-values Distribution Estimate')
-        plt.ylabel('p-value')
-        plt.show()
+        with sns.axes_style("whitegrid"): 
+            plt.figure(figsize=figsize)
+            plt.plot([0, 1], [0, 1], linestyle='dashed', color='black', linewidth=2)
+            plt.vlines(x=0.05,ymin=0,ymax=1,linestyle='dotted', color='black', linewidth=2) 
+            plt.plot(np.array(sorted(self.pvalues)), np.array(sorted(np.linspace(0,1,self.n_resamples))))
+            plt.title('P-values Distribution Estimate')
+            plt.ylabel('p-value')
+            plt.show()
 
 def fwer(n_comparison, alpha=0.05):
     """
