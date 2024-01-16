@@ -151,7 +151,7 @@ class ParentTestInterface:
                 print(f'{k}: {i}')
     
     @staticmethod
-    def _metric_distributions_chart(control_metric, test_metric, title, bins):
+    def _metric_distributions_chart(control_metric, test_metric, title):
         """
         Draws a histogram chart for the distributions of control and test metrics.
 
@@ -161,20 +161,16 @@ class ParentTestInterface:
             Data points for the control group.
         metric_b : array-like
             Data points for the test group.
-        subplot : tuple
-            The subplot configuration (nrows, ncols, index).
         title : str
             The title of the chart.
-        bins : int
-            The number of bins for the histogram.
         """
-        sns.histplot(control_metric, label='Control', bins=bins, stat='probability', color='#19D3F3')
-        sns.histplot(test_metric, label='Test',bins=bins, stat='probability', color='C1')
+        sns.kdeplot(control_metric, common_norm=True, fill=True, color='#19D3F3', label='Control')
+        sns.kdeplot(test_metric, common_norm=True, fill=True, color='C1', label='Test')
         plt.title(title)
         plt.legend()
         
     @staticmethod    
-    def _uplift_distribtuion_chart(uplift_distribution, uplift, bins):
+    def _uplift_distribtuion_chart(uplift_distribution, uplift):
         """
         Draws a cumulative distribution chart for uplift.
 
@@ -184,19 +180,17 @@ class ParentTestInterface:
             Data points for the uplift distribution.
         uplift : float
             The computed uplift value.
-        subplot : tuple
-            The subplot configuration (nrows, ncols, index).
-        bins : int
-            The number of bins for the histogram.
         """
         thresh = 0
-        h = sns.histplot(x=uplift_distribution, bins=bins, stat='probability',cumulative=True, color='#636EFA')
-        for i in h.patches:
-            if i.get_x() <= thresh:
-                i.set_facecolor('#EF553B')
+        x=np.sort(uplift_distribution)
+        y=np.arange(x.shape[0]) / x.shape[0]
+        
+        plt.plot(x, y, color='black', alpha=0.5) 
         plt.axvline(x=uplift, color='black', linestyle='--')
-        plt.yticks(np.arange(0,1.1,0.1))
-        plt.title('Uplift Distribution')
+        plt.fill_between(x, y, where=(x > thresh), color='#89CFF0', alpha=0.5, interpolate=True)  
+        plt.fill_between(x, y, where=(x < thresh), color='#EF553B', alpha=0.5, interpolate=True)  
+        plt.title('Uplift ECDF')
+        plt.ylabel('probability')
                 
     def resample():
         """
@@ -322,41 +316,35 @@ class BayesBeta(ParentTestInterface):
         
         return self._get_readable_format(result_dict=result) if readable else result
                 
-    def get_charts(self, figsize=(22,6), bins=50):
+    def get_charts(self, figsize=(22,6)):
         """
-        Calculates statistical significance and other metrics.
+        Generates and displays charts visualizing the resampling results.
 
         Parameters
         ----------
-        two_sided : bool, default=False
-            Determines if the test is two-sided. If False, a one-sided test is performed.
-        readable : bool, default=False
-            If True, prints the results in a readable format.
-
-        Returns
-        -------
-        dict
-            Dictionary of computed metrics, including significance information, uplift, control loss, and test loss.
+        figsize : tuple of int, default=(22, 6)
+            The size of the figure to be displayed.
         """
-        plt.figure(figsize=figsize)
-        plt.subplot(1,3,1)
-        self._metric_distributions_chart(control_metric=self.beta_control, 
-                                         test_metric=self.beta_test, 
-                                         title='Beta Distributions for CR', 
-                                         bins=bins)
-        
-        plt.subplot(1,3,2)
-        sns.histplot(x=self.beta_control,y=self.beta_test,bins=bins, color='#3366CC')
-        plt.xlabel('control')
-        plt.ylabel('test')
-        min_xy, max_xy = np.min([self.beta_control, self.beta_test]), np.max([self.beta_control, self.beta_test])
-        plt.axline(xy1=[min_xy, min_xy], xy2=[max_xy,max_xy], color='black', linestyle='--')
-        plt.title('Joint Distribution')
-        plt.subplot(1,3,3)
-        self._uplift_distribtuion_chart(uplift_distribution=self.uplift_dist, 
-                                        uplift=self.uplift, 
-                                        bins=bins)
-        plt.show()
+        with sns.axes_style('whitegrid'):
+            plt.figure(figsize=figsize)
+            plt.subplot(1,3,1)
+            self._metric_distributions_chart(control_metric=self.beta_control, 
+                                             test_metric=self.beta_test, 
+                                             title='Beta Distributions for CR', 
+                                             )
+            
+            plt.subplot(1,3,2)
+            sns.histplot(x=self.beta_control,y=self.beta_test,bins=50, color='#3366CC')
+            plt.xlabel('control')
+            plt.ylabel('test')
+            min_xy, max_xy = np.min([self.beta_control, self.beta_test]), np.max([self.beta_control, self.beta_test])
+            plt.axline(xy1=[min_xy, min_xy], xy2=[max_xy,max_xy], color='black', linestyle='--')
+            plt.title('Joint Distribution')
+            plt.subplot(1,3,3)
+            self._uplift_distribtuion_chart(uplift_distribution=self.uplift_dist, 
+                                            uplift=self.uplift, 
+                                            )
+            plt.show()
 
 
 class Bootstrap(ParentTestInterface):
@@ -494,7 +482,7 @@ class Bootstrap(ParentTestInterface):
         
         return self._get_readable_format(result_dict=result) if readable else result
 
-    def get_charts(self, figsize=(22, 6), bins=50):
+    def get_charts(self, figsize=(22, 6)):
         """
         Generates and displays charts visualizing the resampling results.
 
@@ -502,24 +490,23 @@ class Bootstrap(ParentTestInterface):
         ----------
         figsize : tuple of int, default=(22, 6)
             The size of the figure to be displayed.
-        bins : int, default=50
-            The number of bins to use in the histograms.
         """
-        plt.figure(figsize=figsize)
-        plt.subplot(1,3,1)
-        self._metric_distributions_chart(control_metric=self._resample_data[:, 0],
-                                         test_metric=self._resample_data[:, 1],
-                                         title=f'Distribution of {self.func.__name__}(s) for each group',
-                                         bins=bins)
-        
-        plt.subplot(1, 3, 2)
-        bar = sns.histplot(self.diffs, bins=bins, stat='probability', color='#DAA520')
-        plt.title(f'Distribution of {self.func.__name__}(s) differences (Test-Control)')
-        plt.subplot(1,3,3)
-        self._uplift_distribtuion_chart(uplift_distribution=self.uplift_dist, 
-                                        uplift=self.uplift, 
-                                        bins=bins)
-        plt.show()
+        with sns.axes_style('whitegrid'):
+            plt.figure(figsize=figsize)
+            plt.subplot(1,3,1)
+            self._metric_distributions_chart(control_metric=self._resample_data[:, 0],
+                                             test_metric=self._resample_data[:, 1],
+                                             title=f'Distribution of {self.func.__name__}(s) for each group',
+                                             )
+            
+            plt.subplot(1, 3, 2)
+            bar = sns.kdeplot(self.diffs, fill=True, color='#DAA520')
+            plt.title(f'Distribution of {self.func.__name__}(s) differences (Test-Control)')
+            plt.subplot(1,3,3)
+            self._uplift_distribtuion_chart(uplift_distribution=self.uplift_dist, 
+                                            uplift=self.uplift, 
+                                            )
+            plt.show()
 
 class QuantileBootstrap(ParentTestInterface):
     """
@@ -603,7 +590,7 @@ class QuantileBootstrap(ParentTestInterface):
         
         return self._get_readable_format(result_dict=result) if readable else result
         
-    def get_charts(self, figsize=(22, 6), bins=50):
+    def get_charts(self, figsize=(22, 6)):
         """
         Generates and displays charts visualizing the resampling results.
 
@@ -611,24 +598,23 @@ class QuantileBootstrap(ParentTestInterface):
         ----------
         figsize : tuple of int, default=(22, 6)
             The size of the figure to be displayed.
-        bins : int, default=50
-            The number of bins to use in the histograms.
         """
-        plt.figure(figsize=figsize)
-        plt.subplot(1,3,1)
-        self._metric_distributions_chart(control_metric=self.resample_a,
-                                         test_metric=self.resample_b,
-                                         title=f'Distribution of q {self.q} for each group',
-                                         bins=bins)
-        
-        plt.subplot(1, 3, 2)
-        bar = sns.histplot(self.diffs, bins=bins, stat='probability', color='#DAA520')
-        plt.title(f'Distribution of q {self.q} differences (Test-Contol)')
-        plt.subplot(1,3,3)
-        self._uplift_distribtuion_chart(uplift_distribution=self.uplift_dist, 
-                                        uplift=self.uplift, 
-                                        bins=bins)
-        plt.show()  
+        with sns.axes_style('whitegrid'):
+            plt.figure(figsize=figsize)
+            plt.subplot(1,3,1)
+            self._metric_distributions_chart(control_metric=self.resample_a,
+                                             test_metric=self.resample_b,
+                                             title=f'Distribution of q {self.q} for each group',
+                                             )
+            
+            plt.subplot(1, 3, 2)
+            bar = sns.kdeplot(self.diffs, fill=True, color='#DAA520')
+            plt.title(f'Distribution of q {self.q} differences (Test-Contol)')
+            plt.subplot(1,3,3)
+            self._uplift_distribtuion_chart(uplift_distribution=self.uplift_dist, 
+                                            uplift=self.uplift, 
+                                            )
+            plt.show()  
 
 
 class ParametricResamplingTest(ParentTestInterface):
@@ -725,7 +711,7 @@ class ParametricResamplingTest(ParentTestInterface):
         
         return self._get_readable_format(result_dict=result) if readable else result
                     
-    def get_charts(self, figsize=(22, 6), bins=50):
+    def get_charts(self, figsize=(22, 6)):
         """
         Generates and displays charts for visualizing the resampling results.
 
@@ -733,24 +719,23 @@ class ParametricResamplingTest(ParentTestInterface):
         ----------
         figsize : tuple of int, default=(22, 6)
             The size of the figure to be displayed.
-        bins : int, default=50
-            The number of bins to use in the histograms.
         """
-        plt.figure(figsize=figsize)
-        plt.subplot(1,3,1)
-        self._metric_distributions_chart(control_metric=self.resample_a,
-                                         test_metric=self.resample_b,
-                                         title=f'Distribution of Mean(s) for each group',
-                                         bins=bins)
-        
-        plt.subplot(1, 3, 2)
-        bar = sns.histplot(self.diffs, bins=bins, stat='probability', color='#DAA520')
-        plt.title(f'Distribution of Mean(s) differences (Test-Control)')
-        plt.subplot(1,3,3)
-        self._uplift_distribtuion_chart(uplift_distribution=self.uplift_dist, 
-                                        uplift=self.uplift, 
-                                        bins=bins)
-        plt.show()
+        with sns.axes_style('whitegrid'):
+            plt.figure(figsize=figsize)
+            plt.subplot(1,3,1)
+            self._metric_distributions_chart(control_metric=self.resample_a,
+                                             test_metric=self.resample_b,
+                                             title=f'Distribution of Mean(s) for each group',
+                                             )
+            
+            plt.subplot(1, 3, 2)
+            bar = sns.kdeplot(self.diffs, fill=True, color='#DAA520')
+            plt.title(f'Distribution of Mean(s) differences (Test-Control)')
+            plt.subplot(1,3,3)
+            self._uplift_distribtuion_chart(uplift_distribution=self.uplift_dist, 
+                                            uplift=self.uplift, 
+                                            )
+            plt.show()
 
 
 def permutation_ind(*samples,
