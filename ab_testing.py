@@ -617,13 +617,13 @@ class QuantileBootstrap(ParentTestInterface):
             plt.show()  
 
 
-class ParametricResamplingTest(ParentTestInterface):
+class ResamplingTtest(ParentTestInterface):
     """
-    A class for performing parametric resampling tests in A/B testing. This class 
-    assumes normal distribution of test statistics and simulates resampling using 
-    parametric techniques, making it more efficient for large datasets.
+    A class for conducting t-distribution based resampling tests in A/B testing scenarios. This class
+    simulates resampling by generating t-distributed random variables, ideal for situations where 
+    the normal distribution assumption may not hold, such as with smaller sample sizes.
 
-    Inherits from ParentTestInterface to leverage common A/B testing functionalities.
+    Inherits from ParentTestInterface to utilize common functionalities in A/B testing analysis.
 
     Parameters
     ----------
@@ -642,7 +642,7 @@ class ParametricResamplingTest(ParentTestInterface):
         
     def resample(self, mean, std, n):
         """
-        Performs the resampling process based on provided means, standard deviations, and sample sizes.
+        Performs the resampling process using a t-distribution approach.
 
         Parameters
         ----------
@@ -656,33 +656,33 @@ class ParametricResamplingTest(ParentTestInterface):
         Raises
         ------
         ValueError
-            If the length of any of the input lists is not equal to 2.
+            If the length of any input list is not equal to 2.
         """
         if len(mean) != 2 or len(std) != 2 or len(n) != 2:
             raise ValueError('Len of all collections must be equal to 2')
     
-        mean, std, n = np.asarray(mean),np.asarray(std),np.asarray(n)
-        sem = std / n**.5
+        mean, std, self.n = np.asarray(mean),np.asarray(std),np.asarray(n)
+        sem = std / self.n**.5
         self.delta_mean = mean[1]-mean[0]
         self.delta_sem = (sem[0]**2+sem[1]**2)**.5
         
         np.random.seed(self.random_state)
         
-        self.resample_a = np.random.normal(mean[0],sem[0], size=self.n_resamples)
-        self.resample_b = np.random.normal(mean[1],sem[1], size=self.n_resamples)
+        self.resample_a = st.t.rvs(loc=mean[0],scale=sem[0], df=self.n[0], size=self.n_resamples)
+        self.resample_b = st.t.rvs(loc=mean[1],scale=sem[1], df=self.n[1], size=self.n_resamples)
         
         self.uplift = self._compute_uplift(mean[0],mean[1])
         self.diffs = self.resample_b - self.resample_a
-        self.a_ci = self._compute_ci(self.resample_a)
-        self.b_ci = self._compute_ci(self.resample_b)
-        self.diff_ci = self._compute_ci(self.diffs)
+        self.a_ci = st.t.interval(confidence=self.confidence_level, loc=mean[0],scale=sem[0], df=self.n[0])
+        self.b_ci = st.t.interval(confidence=self.confidence_level, loc=mean[1],scale=sem[1], df=self.n[1])
+        self.diff_ci = st.t.interval(confidence=self.confidence_level, loc=self.delta_mean, scale=self.delta_sem, df=self.n.sum()-2)
         self.uplift_dist = self._compute_uplift(self.resample_a, self.resample_b)
         self.uplift_ci = self._compute_ci(self.uplift_dist)
         return self.get_test_parameters()
             
     def compute(self, two_sided=True, readable=False):
         """
-        Computes the statistical significance of the comparison.
+        Computes the statistical significance of the comparison based on t-distribution.
 
         Parameters
         ----------
@@ -697,7 +697,7 @@ class ParametricResamplingTest(ParentTestInterface):
             A dictionary of computed metrics including p-value and uplift metrics.
         """
 
-        p = st.norm.cdf(x=0,loc=self.delta_mean, scale=self.delta_sem)
+        p = st.t.cdf(x=0,loc=self.delta_mean, scale=self.delta_sem, df=self.n.sum()-2)
         pvalue = self._get_alternative_value(p=p, two_sided=two_sided)
         
         result = {
