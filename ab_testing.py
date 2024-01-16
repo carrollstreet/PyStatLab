@@ -668,13 +668,13 @@ class ResamplingTtest(ParentTestInterface):
         
         np.random.seed(self.random_state)
         
-        self.resample_a = st.t.rvs(loc=mean[0],scale=sem[0], df=self.n[0], size=self.n_resamples)
-        self.resample_b = st.t.rvs(loc=mean[1],scale=sem[1], df=self.n[1], size=self.n_resamples)
+        self.resample_a = st.t.rvs(loc=mean[0],scale=sem[0], df=self.n[0]-1, size=self.n_resamples)
+        self.resample_b = st.t.rvs(loc=mean[1],scale=sem[1], df=self.n[1]-1, size=self.n_resamples)
         
         self.uplift = self._compute_uplift(mean[0],mean[1])
         self.diffs = self.resample_b - self.resample_a
-        self.a_ci = st.t.interval(confidence=self.confidence_level, loc=mean[0],scale=sem[0], df=self.n[0])
-        self.b_ci = st.t.interval(confidence=self.confidence_level, loc=mean[1],scale=sem[1], df=self.n[1])
+        self.a_ci = st.t.interval(confidence=self.confidence_level, loc=mean[0],scale=sem[0], df=self.n[0]-1)
+        self.b_ci = st.t.interval(confidence=self.confidence_level, loc=mean[1],scale=sem[1], df=self.n[1]-1)
         self.diff_ci = st.t.interval(confidence=self.confidence_level, loc=self.delta_mean, scale=self.delta_sem, df=self.n.sum()-2)
         self.uplift_dist = self._compute_uplift(self.resample_a, self.resample_b)
         self.uplift_ci = self._compute_ci(self.uplift_dist)
@@ -697,7 +697,7 @@ class ResamplingTtest(ParentTestInterface):
             A dictionary of computed metrics including p-value and uplift metrics.
         """
 
-        p = st.t.cdf(x=0,loc=self.delta_mean, scale=self.delta_sem, df=self.n.sum()-2)
+        p = st.t.cdf(x=0, loc=self.delta_mean, scale=self.delta_sem, df=self.n.sum()-2)
         pvalue = self._get_alternative_value(p=p, two_sided=two_sided)
         
         result = {
