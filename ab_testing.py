@@ -614,9 +614,10 @@ class QuantileBootstrap(ParentTestInterface):
 
 class ResamplingTtest(ParentTestInterface):
     """
-    A class for conducting t-distribution based resampling tests in A/B testing scenarios. This class
-    simulates resampling by generating t-distributed random variables, ideal for situations where 
-    the normal distribution assumption may not hold, such as with smaller sample sizes.
+    A class for conducting t-distribution-based resampling tests in A/B testing scenarios. This class
+    generates samples distributed according to the t-distribution, ideal for situations where the 
+    normal distribution assumption may not hold, such as with smaller sample sizes. It accounts for 
+    variability in variances and is particularly suitable when dealing with unequal variances between groups.
 
     Inherits from ParentTestInterface to utilize common functionalities in A/B testing analysis.
 
@@ -637,7 +638,9 @@ class ResamplingTtest(ParentTestInterface):
         
     def resample(self, mean, std, n):
         """
-        Performs the resampling process using a t-distribution approach.
+        Performs the resampling process using a t-distribution approach. This method simulates resampling
+        by generating t-distributed random variables, allowing for the consideration of variability in variances
+        across samples.
 
         Parameters
         ----------
@@ -657,42 +660,48 @@ class ResamplingTtest(ParentTestInterface):
             raise ValueError('Len of all collections must be equal to 2')
     
         mean, std, self.n = np.asarray(mean),np.asarray(std),np.asarray(n)
-        sem = std / self.n**.5
+        self.sem = std / self.n**.5
         self.delta_mean = mean[1]-mean[0]
-        self.delta_sem = (sem[0]**2+sem[1]**2)**.5
+        self.delta_sem = (self.sem[0]**2+self.sem[1]**2)**.5
         
         np.random.seed(self.random_state)
         
-        self.resample_a = st.t.rvs(loc=mean[0],scale=sem[0], df=self.n[0]-1, size=self.n_resamples)
-        self.resample_b = st.t.rvs(loc=mean[1],scale=sem[1], df=self.n[1]-1, size=self.n_resamples)
+        self.resample_a = st.t.rvs(loc=mean[0],scale=self.sem[0], df=self.n[0]-1, size=self.n_resamples)
+        self.resample_b = st.t.rvs(loc=mean[1],scale=self.sem[1], df=self.n[1]-1, size=self.n_resamples)
         
         self.uplift = self._compute_uplift(mean[0],mean[1])
         self.diffs = self.resample_b - self.resample_a
-        self.a_ci = st.t.interval(confidence=self.confidence_level, loc=mean[0],scale=sem[0], df=self.n[0]-1)
-        self.b_ci = st.t.interval(confidence=self.confidence_level, loc=mean[1],scale=sem[1], df=self.n[1]-1)
-        self.diff_ci = st.t.interval(confidence=self.confidence_level, loc=self.delta_mean, scale=self.delta_sem, df=self.n.sum()-2)
+        self.a_ci = st.t.interval(confidence=self.confidence_level, loc=mean[0],scale=self.sem[0], df=self.n[0]-1)
+        self.b_ci = st.t.interval(confidence=self.confidence_level, loc=mean[1],scale=self.sem[1], df=self.n[1]-1)
+        self.diff_ci = self._compute_ci(self.diffs)
         self.uplift_dist = self._compute_uplift(self.resample_a, self.resample_b)
         self.uplift_ci = self._compute_ci(self.uplift_dist)
         return self.get_test_parameters()
             
-    def compute(self, two_sided=True, readable=False):
+    def compute(self, two_sided=True, readable=False, equal_var=False):
         """
-        Computes the statistical significance of the comparison based on t-distribution.
+        Computes the statistical significance of the comparison based on t-distribution using an analytical approach.
+        This method enhances the accuracy and efficiency of p-value calculations.
 
         Parameters
         ----------
         two_sided : bool, default=True
             Whether to perform a two-sided test.
         readable : bool, default=False
-            Whether to print results in a human-readable format.
+            Whether to output results in a human-readable format.
+        equal_var : bool, default=False
+            Whether to assume equal variances for the calculation of degrees of freedom.
 
         Returns
         -------
         dict
             A dictionary of computed metrics including p-value and uplift metrics.
         """
-
-        p = st.t.cdf(x=0, loc=self.delta_mean, scale=self.delta_sem, df=self.n.sum()-2)
+        if equal_var:
+            self.df = self.n.sum()-2
+        else:
+            self.df = (self.sem[0]**2 + self.sem[1]**2)**2 / ((self.sem[0]**4 / (self.n[0] - 1)) + (self.sem[1]**4 / (self.n[1] - 1))) 
+        p = st.t.cdf(x=0, loc=self.delta_mean, scale=self.delta_sem, df=self.df)
         pvalue = self._get_alternative_value(p=p, two_sided=two_sided)
         
         result = {
