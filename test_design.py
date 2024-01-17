@@ -242,7 +242,7 @@ def cohens_d(*args, from_samples=True):
             mu_1, mu_2, std_1, std_2 = args
             return abs(mu_1-mu_2) / ((std_1**2 + std_2**2) / 2)**.5
         
-def proportion_size(p, uplift, alpha=0.05, power=0.8, n_comparsion=1,groups=2):
+def proportion_size(p, uplift, n_comparison=1, alpha=0.05, power=0.8, groups=2):
     """
     Calculates the required sample size for detecting a given uplift in proportion, with specified significance level 
     (alpha), power, and number of comparisons.
@@ -256,12 +256,12 @@ def proportion_size(p, uplift, alpha=0.05, power=0.8, n_comparsion=1,groups=2):
         Baseline proportion (e.g., conversion rate) in the control group.
     uplift : float
         Expected relative increase in proportion in the test group compared to the control group.
+    n_comparison : int, default=1
+        Number of pairwise comparisons. For multiple comparisons, the alpha error is adjusted using the Šidák correction.
     alpha : float, default=0.05
         Significance level for the hypothesis test.
     power : float, default=0.8
         Desired power of the test.
-    n_comparison : int, default=1
-        Number of pairwise comparisons. For multiple comparisons, the alpha error is adjusted using the Šidák correction.
     groups : int, default=2
         Number of groups in the experiment (e.g., 2 for a standard A/B test).
 
@@ -279,7 +279,7 @@ def proportion_size(p, uplift, alpha=0.05, power=0.8, n_comparsion=1,groups=2):
     e = proportion_effectsize(p,p*(uplift+1))
     return tt_ind_solve_power(effect_size=e,alpha=1-(1-alpha)**(1/n_comparsion),power=power)*groups
 
-def ttest_size(avg, std, uplift, alpha=0.05, power=0.8, n_comparsion=1,groups=2):
+def ttest_size(avg, std, uplift, n_comparison=1, alpha=0.05, power=0.8, groups=2):
     """
     Calculates the required sample size for detecting a given uplift in means using an independent two-sample t-test, 
     with specified significance level (alpha), power, and number of comparisons.
@@ -295,12 +295,12 @@ def ttest_size(avg, std, uplift, alpha=0.05, power=0.8, n_comparsion=1,groups=2)
         Standard deviation of the baseline group.
     uplift : float
         Expected relative increase (uplift) in the mean for the test group compared to the control group.
+    n_comparison : int, default=1
+        Number of pairwise comparisons. For multiple comparisons, the alpha error is adjusted using the Šidák correction.
     alpha : float, default=0.05
         Significance level for the hypothesis test.
     power : float, default=0.8
         Desired power of the test.
-    n_comparison : int, default=1
-        Number of pairwise comparisons. For multiple comparisons, the alpha error is adjusted using the Šidák correction.
     groups : int, default=2
         Number of groups in the experiment (e.g., 2 for a standard A/B test).
 
