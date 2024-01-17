@@ -356,24 +356,21 @@ class Bootstrap(ParentTestInterface):
 
     Parameters
     ----------
+    func : function, default=np.mean
+        The statistical function to apply to the samples. Used only when ratio=False in resample method.
     confidence_level : float, default=0.95
         The confidence level for calculating confidence intervals.
     n_resamples : int, default=10000
         The number of resampling iterations to perform.
     random_state : int, optional
         The seed for the random number generator to ensure reproducibility.
-    func : function, default=np.mean
-        The statistical function to apply to the samples. Used only when ratio=False in resample method.
-    **func_params : dict
-        Additional parameters to pass to the statistical function. Used only when ratio=False in resample method.
     """
     
-    def __init__(self, confidence_level=0.95, n_resamples=10_000, random_state=None, func=np.mean, **func_params):
+    def __init__(self, func=np.mean, confidence_level=0.95, n_resamples=10_000, random_state=None):
         """
         Constructor for the Bootstrap class.
         """
         self.func = func
-        self.func_params = func_params
         super().__init__(confidence_level=confidence_level, n_resamples=n_resamples, random_state=random_state)
 
     def resample(self, *samples, ind=True, ratio=False, progress_bar=False):
@@ -387,7 +384,7 @@ class Bootstrap(ParentTestInterface):
         ind : bool, default=True
             Whether the samples are independent.
         ratio : bool, default=False
-            Whether to perform test for ratio metric type. If True, `func` and `func_params` are not used.
+            Whether to perform test for ratio metric type. If True, `func` are not used.
         progress_bar : bool, default=False
             Whether to display a progress bar during resampling.
 
@@ -419,14 +416,12 @@ class Bootstrap(ParentTestInterface):
                 size_a, size_b = sample_a.shape[0], sample_b.shape[0]
                 max_size = max(size_a, size_b)
                 _rel_size_comrarison(size_a, size_b)
-                self.uplift = self._compute_uplift(self.func(sample_a, **self.func_params),
-                                                 self.func(sample_b, **self.func_params))
+                self.uplift = self._compute_uplift(self.func(sample_a),
+                                                   self.func(sample_b))
                 resample_data = []
                 for i in rng:
                     ids_a, ids_b = _generate_indices(size=max_size, high_a=size_a, high_b=size_b, ind=ind)
-                    resample_data.append(
-                        [self.func(sample_a[ids_a], **self.func_params), 
-                         self.func(sample_b[ids_b], **self.func_params)])
+                    resample_data.append([self.func(sample_a[ids_a]), self.func(sample_b[ids_b])])
         else:
             if len(samples) != 4:
                 raise ValueError(
@@ -739,13 +734,13 @@ class ResamplingTtest(ParentTestInterface):
 
 
 def permutation_ind(*samples,
+                    func=np.mean, 
                     confidence_level=0.95,
                     n_resamples=10000,
                     two_sided=True, 
                     random_state=None, 
                     progress_bar=False, 
-                    func=np.mean, 
-                    **func_params):
+                    ):
     """
     Performs an independent two-sample permutation test.
 
@@ -755,6 +750,8 @@ def permutation_ind(*samples,
 
     Parameters
     ----------
+    func : function, default=np.mean
+        Function used to compute the test statistic (e.g., np.mean, np.median).
     samples : tuple of array-like
         The two samples to compare.
     confidence_level : float, default=0.95
@@ -767,10 +764,6 @@ def permutation_ind(*samples,
         Seed for the random number generator.
     progress_bar : bool, default=False
         Display a progress bar during computation.
-    func : function, default=np.mean
-        Function used to compute the test statistic (e.g., np.mean, np.median).
-    **func_params : dict
-        Additional parameters for the test statistic function.
 
     Returns
     -------
@@ -801,7 +794,7 @@ def permutation_ind(*samples,
         np.random.shuffle(combined)
         perm_sample_a = combined[:size_a]
         perm_sample_b = combined[size_a:]
-        perm_diff = np.mean(perm_sample_b) - np.mean(perm_sample_a)
+        perm_diff = func(perm_sample_b) - func(perm_sample_a)
         diff_lst.append(perm_diff)
 
     diff_lst = np.array(diff_lst)
