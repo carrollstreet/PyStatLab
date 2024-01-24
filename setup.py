@@ -9,7 +9,7 @@ setup(
     long_description_content_type='text/markdown',
     author='Kiryl Sirotsin',
     author_email='musomania@protonmail.com',
-    url='https://github.com/carrollstreet/PyStatLab/',
+    url='https://github.com/carrollstreet/pystatlab/',
     install_requires=[
         'numpy',
         'pandas',
