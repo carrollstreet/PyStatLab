@@ -16,6 +16,8 @@ setup(
         'scipy',
         'sklearn',
         'plotly',
+        'matplotlib',
+        'seaborn',
         'tqdm'
     ],
     classifiers=[
