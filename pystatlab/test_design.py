@@ -380,9 +380,9 @@ def normal_1samp_size(sigma, d, confidence_level=0.95):
     2d (±d from the mean) at the specified confidence level. This approach is common in preliminary research and study 
     planning where the goal is to determine an adequate sample size for accurate estimation of the population mean.
     """
-    upper_bound = (1 - confidence_level) / 2 
-    n = (st.norm.ppf(upper_bound) * sigma / d)** 2
-    return int(n)
+    z_score = st.norm.ppf(1 - (1 - confidence_level) / 2)
+    n = (z_score * sigma / d)** 2
+    return int(np.ceil(n))
 
 def proportion_1samp_size(p, d, confidence_level=0.05):
     """
