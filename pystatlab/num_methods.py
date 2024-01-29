@@ -262,7 +262,7 @@ class AdamOpt(Optimizer):
         return - (self.learning_rate * self.m / (self.v**.5 + self.epsilon))
     
 def integrate(func, start, end, n=10000, simpson=True):
-"""
+    """
     Performs numerical integration of a given function over a specified interval.
 
     Parameters
