@@ -464,7 +464,8 @@ class Bootstrap(ParentTestInterface):
         dict
             A dictionary of computed metrics.
         """
-        pvalue = self._get_alternative_value(p=np.mean(self._resample_data[:, 1] > self._resample_data[:, 0]), two_sided=two_sided)
+        p = (np.sum(self._resample_data[:, 1] > self._resample_data[:, 0]) + 1) / (self.n_resamples + 1)
+        pvalue = self._get_alternative_value(p=p, two_sided=two_sided)
 
         result = {
             'pvalue': pvalue,
@@ -572,7 +573,8 @@ class QuantileBootstrap(ParentTestInterface):
         readable : bool, default=False
             Whether to print the results in a human-readable format.
         """
-        pvalue = self._get_alternative_value(p=np.mean(self.resample_b > self.resample_a), two_sided=two_sided)
+        p = (np.sum(self.resample_b > self.resample_a) + 1) / (self.n_resamples + 1)
+        pvalue = self._get_alternative_value(p=p, two_sided=two_sided)
         
         result = {
             'pvalue': pvalue,
@@ -807,7 +809,7 @@ def permutation_ind(*samples,
         diff_lst.append(perm_diff)
 
     diff_lst = np.array(diff_lst)
-    p = np.mean(observed_diff > diff_lst)
+    p = (np.sum(observed_diff > diff_lst) + 1) / (n_resamples + 1)
     pvalue = min(2 * p, 2-2 * p)
     pvalue = p if not two_sided else pvalue
     permutation_diff_ci = np.quantile(diff_lst, q=[left_quant, right_quant])
