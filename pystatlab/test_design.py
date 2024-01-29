@@ -277,7 +277,7 @@ def proportion_size(p, uplift, n_comparison=1, alpha=0.05, power=0.8, groups=2):
     designs. The effect size is calculated based on the expected uplift and the baseline proportion.
     """
     e = proportion_effectsize(p,p*(uplift+1))
-    return tt_ind_solve_power(effect_size=e,alpha=1-(1-alpha)**(1/n_comparsion),power=power)*groups
+    return tt_ind_solve_power(effect_size=e,alpha=1-(1-alpha)**(1/n_comparison),power=power)*groups
 
 def ttest_size(avg, std, uplift, n_comparison=1, alpha=0.05, power=0.8, groups=2):
     """
@@ -316,7 +316,7 @@ def ttest_size(avg, std, uplift, n_comparison=1, alpha=0.05, power=0.8, groups=2
     for studies where the primary outcome is a continuous variable, and the objective is to compare means between two groups.
     """
     e = avg * uplift / std
-    return tt_ind_solve_power(effect_size=e, alpha=1-(1-alpha)**(1/n_comparsion), power=power)*groups
+    return tt_ind_solve_power(effect_size=e, alpha=1-(1-alpha)**(1/n_comparison), power=power)*groups
 
 def expected_proportion(effect_size, proportion_1):
     """
