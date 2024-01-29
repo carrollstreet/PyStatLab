@@ -225,6 +225,72 @@ The `test_design` module is instrumental for:
   - `alpha`: Significance level for a single comparison.
 - **Returns**: Calculated FWER.
 
+# stat_analysis
+
+## Functions
+
+### correlation_ratio
+- **Description**: Calculates the correlation ratio between a categorical variable and a continuous variable.
+- **Parameters**:
+  - `values`: Continuous data values (dependent variable).
+  - `categories`: Categories corresponding to the values (independent variable).
+- **Returns**: Calculated correlation ratio, a value between 0 and 1.
+
+### cramers_v
+- **Description**: Calculates Cramér's V statistic for association between two categorical variables.
+- **Parameters**:
+  - `rc_table`: A two-dimensional contingency table of frequencies or counts.
+  - `observations`: Handling method for small sample sizes ('raise' or 'ignore').
+- **Returns**: Dictionary with 'correlation' (Cramér's V value), 'pvalue', and 'chi2'.
+
+### robust_mean
+- **Description**: Calculates a robust mean using truncated or Winsorized mean method.
+- **Parameters**:
+  - `data`: Data for calculation.
+  - `trunc_level`: Level for truncation or Winsorization.
+  - `type_`: Type of robust mean ('truncated' or 'winsorized').
+- **Returns**: Calculated robust mean.
+
+### binom_wilson_confidence_interval
+- **Description**: Calculates the Wilson confidence interval for a binomial proportion.
+- **Parameters**:
+  - `p`: Observed proportion.
+  - `n`: Total number of observations.
+  - `confidence_level`: Desired confidence level.
+- **Returns**: Lower and upper bounds of the Wilson confidence interval.
+
+### get_lognormal_params
+- **Description**: Estimates parameters of a lognormal distribution from mean and standard deviation.
+- **Parameters**:
+  - `mean`: Mean value for normal distribution generation.
+  - `std`: Standard deviation for normal distribution generation.
+- **Returns**: Estimates of mean and standard deviation for the lognormal distribution.
+
+### jackknife_samples
+- **Description**: Generates jackknife samples by omitting each observation systematically.
+- **Parameters**:
+  - `sample`: Original sample data.
+- **Returns**: Array of jackknife samples.
+
+### jackknife_estim
+- **Description**: Performs jackknife resampling to estimate a parameter and its confidence interval.
+- **Parameters**:
+  - `sample`: Original sample data.
+  - `func`: Statistical function to apply.
+  - `confidence_level`: Confidence level for the interval calculation.
+- **Returns**: Dictionary with estimated parameter, bias, standard error, and confidence interval.
+
+### bootstrap_ci
+- **Description**: Calculates bootstrap confidence intervals for a sample statistic.
+- **Parameters**:
+  - `sample`: Original sample data.
+  - `func`: Statistical function to apply.
+  - `confidence_level`: Confidence level for the interval calculation.
+  - `n_resamples`: Number of bootstrap resamples.
+  - `method`: Bootstrap method ('percentile', 'pivotal', 'bca').
+  - `return_dist`: Flag to return bootstrap sample distribution.
+  - `random_state`: Seed for the random number generator.
+- **Returns**: Lower and upper bounds of the confidence interval (and bootstrap samples if `return_dist` is True).
 
 
 
