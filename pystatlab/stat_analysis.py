@@ -199,9 +199,11 @@ def jackknife_samples(sample):
     Returns
     -------
     ndarray
-        Array of jackknife samples.
+        Array of jackknife samples, each with one observation omitted.
         
-    Notes: similar to https://docs.astropy.org/en/stable/api/astropy.stats.jackknife_resampling.html
+    Notes
+    -----
+    Similar to https://docs.astropy.org/en/stable/api/astropy.stats.jackknife_resampling.html
     """
     return np.array([np.delete(sample, i) for i in range(len(sample))])
     
@@ -223,8 +225,10 @@ def jackknife_estim(sample, func=np.mean, confidence_level=0.95):
     dict
         A dictionary containing the estimated parameter ('estim'), bias, standard error ('se'), 
         and confidence interval ('ci').
-        
-    Notes: similar to https://docs.astropy.org/en/stable/api/astropy.stats.jackknife_stats.html
+
+    Notes
+    -----
+    Similar to https://docs.astropy.org/en/stable/api/astropy.stats.jackknife_stats.html
     """
     sample = np.asarray(sample)
     size = sample.shape[0]
@@ -239,7 +243,7 @@ def jackknife_estim(sample, func=np.mean, confidence_level=0.95):
     se = ((size - 1) * np.mean((values - mean_jacknife_stat) ** 2)) ** .5
     return {'estim':estim, 'bias':bias, 'se':se, 'ci':(estim - z * se, estim + z * se)}
 
-def bootstrap_ci(sample, func=np.mean, confidence_level=0.95, n_resamples=10000, method='percentile', random_state=None):
+def bootstrap_ci(sample, func=np.mean, confidence_level=0.95, n_resamples=10000, method='percentile', return_dist=False, random_state=None):
     """
     Calculate bootstrap confidence intervals for a statistic of a sample.
 
@@ -255,6 +259,8 @@ def bootstrap_ci(sample, func=np.mean, confidence_level=0.95, n_resamples=10000,
         The number of bootstrap resamples to generate.
     method : str, default='percentile'
         The bootstrap method to use ('percentile', 'pivotal', 'bca').
+    return_dist : bool, default=False
+        If True, returns the bootstrap sample distribution along with the CI.
     random_state : int, optional
         The seed for the random number generator.
 
@@ -262,9 +268,14 @@ def bootstrap_ci(sample, func=np.mean, confidence_level=0.95, n_resamples=10000,
     -------
     tuple
         The lower and upper bounds of the confidence interval.
-        
-    Reference: http://users.stat.umn.edu/~helwig/notes/bootci-Notes.pdf
-    Notes: close to https://scipy.github.io/devdocs/reference/generated/scipy.stats.bootstrap.html
+
+    Reference
+    ---------
+    http://users.stat.umn.edu/~helwig/notes/bootci-Notes.pdf
+
+    Note
+    ----
+    Close to https://scipy.github.io/devdocs/reference/generated/scipy.stats.bootstrap.html
     """
     np.random.seed(random_state)
     sample = np.asarray(sample)
@@ -276,9 +287,9 @@ def bootstrap_ci(sample, func=np.mean, confidence_level=0.95, n_resamples=10000,
     bootstrap_stats = np.array([func(i) for i in bootstrap_samples])
     
     if method == 'percentile':
-        return tuple(np.quantile(bootstrap_stats, q=[lower, upper]))
+        result = tuple(np.quantile(bootstrap_stats, q=[lower, upper]))
     elif method == 'pivotal':
-        return tuple(np.quantile(2*sample_stat - bootstrap_stats, q=[lower, upper]))
+        result = tuple(np.quantile(2*sample_stat - bootstrap_stats, q=[lower, upper]))
     elif method == 'bca':
         z0 = norm.ppf((np.sum(bootstrap_stats < sample_stat)) / n_resamples)
         jack_smpls = jackknife_samples(sample)
@@ -290,6 +301,8 @@ def bootstrap_ci(sample, func=np.mean, confidence_level=0.95, n_resamples=10000,
         ppf_l, ppf_u = st.norm.ppf(lower), st.norm.ppf(upper)
         a_1 = st.norm.cdf(z0 + (z0 + ppf_l) / (1 - acc * (z0 + ppf_l)))
         a_2 = st.norm.cdf(z0 + (z0 + ppf_u) / (1 - acc * (z0 + ppf_u)))
-        return tuple(np.quantile(bootstrap_stats, q=[a_1,a_2]))
+        result = tuple(np.quantile(bootstrap_stats, q=[a_1,a_2]))
     else:
         raise ValueError(f'Passed {method}. Please use percentile, pivotal, or bca.')
+
+    return result, bootstrap_samples if return_dist else result
