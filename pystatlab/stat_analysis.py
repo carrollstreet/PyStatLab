@@ -186,3 +186,110 @@ def get_lognormal_params(mean, std):
     """
     dist = np.log(np.abs(np.random.normal(mean, std, size=1_000_000)))
     return dist.mean(), dist.std(ddof=1)
+
+def jackknife_samples(sample):
+    """
+    Generate jackknife samples by systematically leaving out each observation from the dataset.
+
+    Parameters
+    ----------
+    sample : array-like
+        The original sample data.
+
+    Returns
+    -------
+    ndarray
+        Array of jackknife samples.
+        
+    Notes: similar to https://docs.astropy.org/en/stable/api/astropy.stats.jackknife_resampling.html
+    """
+    return np.array([np.delete(sample, i) for i in range(len(sample))])
+    
+def jackknife_estim(sample, func=np.mean, confidence_level=0.95):
+    """
+    Perform jackknife resampling to estimate a parameter and its confidence interval.
+
+    Parameters
+    ----------
+    sample : array-like
+        The original sample data.
+    func : function, default=np.mean
+        The statistical function to apply to the sample and jackknife samples.
+    confidence_level : float, default=0.95
+        The confidence level for the confidence interval calculation.
+
+    Returns
+    -------
+    dict
+        A dictionary containing the estimated parameter ('estim'), bias, standard error ('se'), 
+        and confidence interval ('ci').
+        
+    Notes: similar to https://docs.astropy.org/en/stable/api/astropy.stats.jackknife_stats.html
+    """
+    sample = np.asarray(sample)
+    size = sample.shape[0]
+    ids = np.arange(size)
+    z = st.norm.ppf(1 - (1 - confidence_level) / 2)
+    stat = func(sample)
+    jack_sampls = jackknife_samples(sample)
+    values = np.array([func(i) for i in jack_sampls])
+    mean_jacknife_stat = np.mean(values)
+    bias = (size-1) * (mean_jacknife_stat - stat)
+    estim = stat - bias
+    se = ((size - 1) * np.mean((values - mean_jacknife_stat) ** 2)) ** .5
+    return {'estim':estim, 'bias':bias, 'se':se, 'ci':(estim - z * se, estim + z * se)}
+
+def bootstrap_ci(sample, func=np.mean, confidence_level=0.95, n_resamples=10000, method='percentile', random_state=None):
+    """
+    Calculate bootstrap confidence intervals for a statistic of a sample.
+
+    Parameters
+    ----------
+    sample : array-like
+        The original sample data.
+    func : function, default=np.mean
+        The statistical function to apply to the sample and bootstrap samples.
+    confidence_level : float, default=0.95
+        The confidence level for the confidence interval calculation.
+    n_resamples : int, default=10000
+        The number of bootstrap resamples to generate.
+    method : str, default='percentile'
+        The bootstrap method to use ('percentile', 'pivotal', 'bca').
+    random_state : int, optional
+        The seed for the random number generator.
+
+    Returns
+    -------
+    tuple
+        The lower and upper bounds of the confidence interval.
+        
+    Reference: http://users.stat.umn.edu/~helwig/notes/bootci-Notes.pdf
+    Notes: close to https://scipy.github.io/devdocs/reference/generated/scipy.stats.bootstrap.html
+    """
+    np.random.seed(random_state)
+    sample = np.asarray(sample)
+    sample_size = sample.shape[0]
+    sample_stat = func(sample)
+    lower, upper = (1 - confidence_level) / 2, 1 - (1 - confidence_level) / 2
+    
+    bootstrap_samples = np.random.choice(sample, size=(n_resamples, sample_size), replace=True)
+    bootstrap_stats = np.array([func(i) for i in bootstrap_samples])
+    
+    if method == 'percentile':
+        return tuple(np.quantile(bootstrap_stats, q=[lower, upper]))
+    elif method == 'pivotal':
+        return tuple(np.quantile(2*sample_stat - bootstrap_stats, q=[lower, upper]))
+    elif method == 'bca':
+        z0 = norm.ppf((np.sum(bootstrap_stats < sample_stat)) / n_resamples)
+        jack_smpls = jackknife_samples(sample)
+        jackknife_stats = np.array([func(js) for js in jack_smpls])
+        mean_jackknife_stats = np.mean(jackknife_stats)
+        num = np.sum((mean_jackknife_stats - jackknife_stats) ** 3)
+        denom = 6 * (np.sum((mean_jackknife_stats - jackknife_stats) ** 2) ** (3/2))
+        acc = num / denom if denom != 0 else 0
+        ppf_l, ppf_u = st.norm.ppf(lower), st.norm.ppf(upper)
+        a_1 = st.norm.cdf(z0 + (z0 + ppf_l) / (1 - acc * (z0 + ppf_l)))
+        a_2 = st.norm.cdf(z0 + (z0 + ppf_u) / (1 - acc * (z0 + ppf_u)))
+        return tuple(np.quantile(bootstrap_stats, q=[a_1,a_2]))
+    else:
+        raise ValueError(f'Passed {method}. Please use percentile, pivotal, or bca.')
