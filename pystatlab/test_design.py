@@ -413,9 +413,9 @@ def proportion_1samp_size(p, d, confidence_level=0.05):
     to determine the z-score corresponding to the given confidence level. The formula assumes a simple random sample and 
     is most accurate when the sample size is small relative to the population size.
     """
-    upper_bound = (1 - confidence_level) / 2 
-    n = (st.norm.ppf(upper_bound) / d)**2 * p * (1-p)
-    return int(n)
+    z_score = st.norm.ppf(1 - (1 - confidence_level) / 2)
+    n = (z_score / d)**2 * p * (1-p)
+    return int(np.ceil(n))
 
 class TestAnalyzer:
     """
