@@ -286,7 +286,7 @@ def bootstrap_ci(sample, func=np.mean, confidence_level=0.95, n_resamples=10000,
     rng = tqdm(range(n_resamples)) if progress_bar else range(n_resamples)
     bootstrap_stats = []
     for i in rng:
-        bootstrap_stats.append(func(np.random.choice(sample, size=(n_resamples, sample_size), replace=True)))
+        bootstrap_stats.append(func(sample[np.random.randint(0,sample_size,sample_size)]))
     
     if method == 'percentile':
         result = tuple(np.quantile(bootstrap_stats, q=[lower, upper]))
