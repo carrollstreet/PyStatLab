@@ -1,5 +1,6 @@
 import numpy as np
 import scipy.stats as st
+from tqdm import tqdm
 
 def correlation_ratio(values, categories):
     """
@@ -243,7 +244,7 @@ def jackknife_estim(sample, func=np.mean, confidence_level=0.95):
     se = ((size - 1) * np.mean((values - mean_jacknife_stat) ** 2)) ** .5
     return {'estim':estim, 'bias':bias, 'se':se, 'ci':(estim - z * se, estim + z * se)}
 
-def bootstrap_ci(sample, func=np.mean, confidence_level=0.95, n_resamples=10000, method='percentile', return_dist=False, random_state=None):
+def bootstrap_ci(sample, func=np.mean, confidence_level=0.95, n_resamples=10000, method='percentile', return_dist=False, progress_bar=True, random_state=None):
     """
     Calculate bootstrap confidence intervals for a statistic of a sample.
 
@@ -282,9 +283,10 @@ def bootstrap_ci(sample, func=np.mean, confidence_level=0.95, n_resamples=10000,
     sample_size = sample.shape[0]
     sample_stat = func(sample)
     lower, upper = (1 - confidence_level) / 2, 1 - (1 - confidence_level) / 2
-    
-    bootstrap_samples = np.random.choice(sample, size=(n_resamples, sample_size), replace=True)
-    bootstrap_stats = np.array([func(i) for i in bootstrap_samples])
+    rng = tqdm(range(n_resamples)) if progress_bar else range(n_resamples)
+    bootstrap_stats = []
+    for i in rng:
+        bootstrap_stats.append(func(np.random.choice(sample, size=(n_resamples, sample_size), replace=True)))
     
     if method == 'percentile':
         result = tuple(np.quantile(bootstrap_stats, q=[lower, upper]))
