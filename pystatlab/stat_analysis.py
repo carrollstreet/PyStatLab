@@ -307,4 +307,4 @@ def bootstrap_ci(sample, func=np.mean, confidence_level=0.95, n_resamples=10000,
     else:
         raise ValueError(f'Passed {method}. Please use percentile, pivotal, or bca.')
 
-    return result, bootstrap_samples if return_dist else result
+    return (result, bootstrap_stats) if return_dist else result
