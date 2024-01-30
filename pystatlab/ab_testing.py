@@ -810,11 +810,107 @@ def permutation_ind(*samples,
 
     diff_lst = np.array(diff_lst)
     p = (np.sum(observed_diff > diff_lst) + 1) / (n_resamples + 1)
-    pvalue = min(2 * p, 2-2 * p)
-    pvalue = p if not two_sided else pvalue
+    if two_sided:
+        p = (np.sum(np.abs(observed_diff) > np.abs(diff_lst)) + 1) / (n_resamples + 1)
+        pvalue = min(2*p, 2-2*p)
+    else:
+        pvalue = (np.sum(observed_diff > diff_lst) + 1) / (n_resamples + 1) 
     permutation_diff_ci = np.quantile(diff_lst, q=[left_quant, right_quant])
-    return {'pvalue': pvalue, 'uplift': uplift, 'observed_diff': observed_diff, 'permutation_diff_ci': permutation_diff_ci}
+    return {'pvalue': pvalue, 'uplift': uplift, 'stat': observed_diff, 'permutation_diff_ci': permutation_diff_ci}
 
+def permutation_did(*values, group_label, experiment_stage_label, ratio=False, two_sided=True, n_resamples=10_000, random_state=None):
+    """
+    Performs permutation-based Difference-in-Differences analysis on given data.
+
+    Parameters
+    ----------
+    values : tuple of array-like
+        The data to analyze. For ratio metrics, pass two data columns (numerator and denominator). 
+        For non-ratio metrics, pass one sample of data.
+    group_label : array-like
+        An array indicating group membership (e.g., treatment vs control).
+    experiment_stage_label : array-like
+        An array indicating the stage of the experiment (e.g., before vs after intervention).
+    ratio : bool, default=False
+        If True, analyze ratio metrics. If False, analyze non-ratio metrics.
+    two_sided : bool, default=True
+        If True, perform a two-sided test. If False, perform a one-sided test.
+    n_resamples : int, default=10000
+        Number of permutations to use in the analysis.
+    random_state : int, optional
+        Seed for the random number generator.
+
+    Returns
+    -------
+    dict
+        A dictionary containing the calculated difference-in-differences statistic ('stat')
+        and the associated p-value ('pvalue').
+
+    Raises
+    ------
+    ValueError
+        If the sizes of the arrays do not match or the incorrect number of arrays are provided for the specified metric type.
+
+    Reference
+    ---------
+    Detailed explanation and examples of the Difference-in-Differences analysis can be found in the article:
+    "How to Accurately Test Significance with Difference-in-Difference Models" available at:
+    https://engineering.atspotify.com/2023/09/how-to-accurately-test-significance-with-difference-in-difference-models/
+    """
+    group_label, experiment_stage_label = np.asarray(group_label), np.asarray(experiment_stage_label)
+    
+    if ratio:
+        if len(values) != 2:
+            raise ValueError('For ratio metrics you must use two data columns: numerator and denominator')
+        else:
+            numerator, denominator = np.asarray(values[0]), np.asarray(values[1])
+            if not ((denominator.shape[0] == numerator.shape[0]) and (numerator.shape[0] == group_label.shape[0]) and (group_label.shape[0] == experiment_stage_label.shape[0])):
+                raise ValueError('All arrays must have the same size')
+    elif not ratio:
+        if len(values) != 1:
+            raise ValueError('For non-ratio metrics you must use one sample of data')
+        else:
+            values = np.asarray(values[0])
+            if not ((values.shape[0] == group_label.shape[0]) and (group_label.shape[0] == experiment_stage_label.shape[0])):
+                raise ValueError('All arrays must have the same size')
+                
+    
+    def _groupby(values, group_label, experiment_stage_label):
+        data = {}
+        for i in sorted(set(group_label)):
+            data.setdefault(i,[])
+            for j in sorted(set(experiment_stage_label)):
+                data[i].append(np.sum(values[np.where((group_label == i) & (experiment_stage_label == j))]))
+        return np.array(list(data.values()))
+    
+    def _compute_did(grouped_data):
+        delta_between_stages = grouped_data[:,1]-grouped_data[:,0]
+        return delta_between_stages[1]-delta_between_stages[0]
+    
+    np.random.seed(random_state)
+    
+    stat = []
+    if not ratio:
+        true_did = _compute_did(_groupby(values, group_label, experiment_stage_label))
+        for i in range(n_resamples):
+            stat.append(_compute_did(_groupby(values, np.random.permutation(group_label), experiment_stage_label)))
+    else:
+        grouped_num = _groupby(numerator, group_label, experiment_stage_label)
+        grouped_denom = _groupby(denominator, group_label, experiment_stage_label)
+        true_did = _compute_did(grouped_num / grouped_denom)        
+        for i in range(n_resamples):
+            perm_data = np.random.permutation(group_label)
+            grouped_num = _groupby(numerator, perm_data, experiment_stage_label)
+            grouped_denom = _groupby(denominator, perm_data, experiment_stage_label)
+            stat.append(_compute_did(grouped_num / grouped_denom))
+            
+    if two_sided:
+        p = (np.sum(np.abs(true_did) > np.abs(stat)) + 1) / (n_resamples + 1)
+        pvalue = min(2*p, 2-2*p)
+    else:
+        pvalue = (np.sum(true_did > stat) + 1) / (n_resamples + 1) 
+    
+    return {'stat': true_did, 'pvalue': pvalue}
 
 def g_squared(contingency_table):
     """
