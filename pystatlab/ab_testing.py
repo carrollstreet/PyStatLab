@@ -809,12 +809,8 @@ def permutation_ind(*samples,
         diff_lst.append(perm_diff)
 
     diff_lst = np.array(diff_lst)
-    p = (np.sum(observed_diff > diff_lst) + 1) / (n_resamples + 1)
-    if two_sided:
-        p = (np.sum(np.abs(observed_diff) > np.abs(diff_lst)) + 1) / (n_resamples + 1)
-        pvalue = min(2*p, 2-2*p)
-    else:
-        pvalue = (np.sum(observed_diff > diff_lst) + 1) / (n_resamples + 1) 
+    p = (np.sum(observed_diff > diff_lst) + 1) / (n_resamples + 1) 
+    pvalue = min(2*p, 2-2*p) if two_sided else p
     permutation_diff_ci = np.quantile(diff_lst, q=[left_quant, right_quant])
     return {'pvalue': pvalue, 'uplift': uplift, 'stat': observed_diff, 'permutation_diff_ci': permutation_diff_ci}
 
@@ -904,11 +900,8 @@ def permutation_did(*values, group_label, experiment_stage_label, ratio=False, t
             grouped_denom = _groupby(denominator, perm_data, experiment_stage_label)
             stat.append(_compute_did(grouped_num / grouped_denom))
             
-    if two_sided:
-        p = (np.sum(np.abs(true_did) > np.abs(stat)) + 1) / (n_resamples + 1)
-        pvalue = min(2*p, 2-2*p)
-    else:
-        pvalue = (np.sum(true_did > stat) + 1) / (n_resamples + 1) 
+    p = (np.sum(true_did > stat) + 1) / (n_resamples + 1) 
+    pvalue = min(2*p, 2-2*p) if two_sided else p
     
     return {'stat': true_did, 'pvalue': pvalue}
 
