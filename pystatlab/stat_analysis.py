@@ -293,7 +293,7 @@ def bootstrap_ci(sample, func=np.mean, confidence_level=0.95, n_resamples=10000,
     elif method == 'pivotal':
         result = tuple(np.quantile(2*sample_stat - bootstrap_stats, q=[lower, upper]))
     elif method == 'bca':
-        z0 = norm.ppf((np.sum(bootstrap_stats < sample_stat)) / n_resamples)
+        z0 = st.norm.ppf((np.sum(bootstrap_stats < sample_stat)) / n_resamples)
         jack_smpls = jackknife_samples(sample)
         jackknife_stats = np.array([func(js) for js in jack_smpls])
         mean_jackknife_stats = np.mean(jackknife_stats)
