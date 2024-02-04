@@ -232,16 +232,14 @@ def jackknife_estim(sample, func=np.mean, confidence_level=0.95):
     Similar to https://docs.astropy.org/en/stable/api/astropy.stats.jackknife_stats.html
     """
     sample = np.asarray(sample)
-    size = sample.shape[0]
-    ids = np.arange(size)
+    sample_size = sample.shape[0]
     z = st.norm.ppf(1 - (1 - confidence_level) / 2)
     stat = func(sample)
-    jack_sampls = jackknife_samples(sample)
-    values = np.array([func(i) for i in jack_sampls])
-    mean_jacknife_stat = np.mean(values)
-    bias = (size-1) * (mean_jacknife_stat - stat)
+    jackknife_stats = np.array([func(np.delete(sample, i)) for i in range(sample_size)])
+    mean_jacknife_stat = np.mean(jackknife_stats)
+    bias = (sample_size-1) * (mean_jacknife_stat - stat)
     estim = stat - bias
-    se = ((size - 1) * np.mean((values - mean_jacknife_stat) ** 2)) ** .5
+    se = ((sample_size - 1) * np.mean((jackknife_stats - mean_jacknife_stat) ** 2)) ** .5
     return {'estim':estim, 'bias':bias, 'se':se, 'ci':(estim - z * se, estim + z * se)}
 
 def bootstrap_ci(sample, func=np.mean, confidence_level=0.95, n_resamples=10000, method='percentile', return_dist=False, progress_bar=True, random_state=None):
@@ -294,8 +292,7 @@ def bootstrap_ci(sample, func=np.mean, confidence_level=0.95, n_resamples=10000,
         result = tuple(np.quantile(2*sample_stat - bootstrap_stats, q=[lower, upper]))
     elif method == 'bca':
         z0 = st.norm.ppf((np.sum(bootstrap_stats < sample_stat)) / n_resamples)
-        jack_smpls = jackknife_samples(sample)
-        jackknife_stats = np.array([func(js) for js in jack_smpls])
+        jackknife_stats = np.array([func(np.delete(sample, i)) for i in range(sample_size)])
         mean_jackknife_stats = np.mean(jackknife_stats)
         num = np.sum((mean_jackknife_stats - jackknife_stats) ** 3)
         denom = 6 * (np.sum((mean_jackknife_stats - jackknife_stats) ** 2) ** (3/2))
@@ -308,3 +305,125 @@ def bootstrap_ci(sample, func=np.mean, confidence_level=0.95, n_resamples=10000,
         raise ValueError(f'Passed {method}. Please use percentile, pivotal, or bca.')
 
     return (result, bootstrap_stats) if return_dist else result
+
+class BootstrapWrapper:
+    """
+    A decorator class for applying bootstrap resampling to estimate confidence intervals 
+    for statistics calculated from sample data.
+
+    Attributes:
+    -----------
+    confidence_level : float, optional
+        The confidence level for the confidence interval estimation. Default is 0.95.
+    n_resamples : int, optional
+        The number of bootstrap resamples to generate. Default is 10,000.
+    random_state : int, optional
+        Seed for the random number generator to ensure reproducibility. Default is None.
+    return_dist : bool, optional
+        If True, returns both the confidence interval and the resampled statistics distribution. Default is False.
+    progress_bar : bool, optional
+        If True, displays a progress bar during the bootstrap resampling. Default is True.
+
+    Methods:
+    --------
+    __init__(self, confidence_level=0.95, n_resamples=10_000, random_state=None, return_dist=False, progress_bar=True)
+        Initializes the BootstrapWrapper with specified attributes.
+
+    _compute_ci(self, data)
+        Computes the confidence interval from the bootstrap resampled statistics.
+
+    _get_idx(size)
+        Generates random indices for resampling, given the sample size.
+
+    __call__(self, func)
+        The main method that applies bootstrap resampling to the function `func` passed to the decorator.
+        It wraps `func`, performing bootstrap resampling on its input data, and then applies `func`
+        to each resampled dataset to compute the desired statistic.
+
+    Usage example:
+    --------------
+    @BootstrapWrapper()
+    def linear_reg_coef(x,y):
+        return np.polyfit(x,y, deg=1)[1]
+
+    # Now `linear_reg_coef` will return the 95% confidence interval of the slope coef based on bootstrap resampling.
+
+    Raises:
+    -------
+    TypeError
+        If any of the arguments passed to the decorated function is not iterable.
+    """
+    def __init__(self, confidence_level=0.95, n_resamples=10_000, random_state=None, return_dist=False, progress_bar=True):
+        """Constructor for the BootstrapWrapper class"""
+        self.n_resamples = n_resamples
+        self.random_state = random_state
+        self.lower, self.upper = (1 - confidence_level) / 2, 1 - (1 - confidence_level) / 2
+        self.progress_bar = progress_bar
+        self.return_dist = return_dist
+
+    def _compute_ci(self, data):
+        """
+        Computes the confidence interval from the bootstrap statistics.
+
+        Parameters:
+        -----------
+        data : array-like
+            The bootstrap statistics from which to compute the confidence interval.
+
+        Returns:
+        --------
+        tuple
+            The lower and upper bounds of the confidence interval.
+        """
+        return np.quantile(data, q=[self.lower, self.upper], axis=0)
+    
+    @staticmethod
+    def _get_idx(size):
+        """
+        Generates random indices for resampling.
+
+        Parameters:
+        -----------
+        size : int
+            The size of the sample from which to generate indices.
+
+        Returns:
+        --------
+        ndarray
+            An array of random indices.
+        """
+        return np.random.randint(low=0, high=size, size=size)
+    
+    def __call__(self, func):
+        """
+        The main decorator method that wraps the target function, applying bootstrap resampling to its arguments.
+
+        Parameters:
+        -----------
+        func : callable
+            The target function to which bootstrap resampling is applied.
+
+        Returns:
+        --------
+        callable
+            A wrapped version of the target function that applies bootstrap resampling.
+        """
+        def wrapper(*args, **kwargs):
+            np.random.seed(self.random_state)
+            rng = tqdm(range(self.n_resamples)) if self.progress_bar else range(self.n_resamples)
+            self.stat_lst = []
+            size_lst = []
+            for arg in args:
+                if not hasattr(arg, '__len__'):
+                    raise TypeError('All args must be iterable')
+                else:
+                    size_lst.append(len(arg)) 
+            size = min(size_lst)
+            arrs = np.column_stack([i for i in args])
+            for i in rng:
+                idx = self._get_idx(size)
+                sub = arrs[idx]
+                sub_lst = [sub[:,i] for i in range(sub.shape[1])]
+                self.stat_lst.append(func(*sub_lst, **kwargs))
+            return (self._compute_ci(self.stat_lst), self.stat_lst) if self.return_dist else self._compute_ci(self.stat_lst)
+        return wrapper
