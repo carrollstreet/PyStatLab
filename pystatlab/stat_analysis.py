@@ -292,7 +292,8 @@ def bootstrap_ci(sample, func=np.mean, confidence_level=0.95, n_resamples=10000,
         result = tuple(np.quantile(2*sample_stat - bootstrap_stats, q=[lower, upper]))
     elif method == 'bca':
         z0 = st.norm.ppf((np.sum(bootstrap_stats < sample_stat)) / n_resamples)
-        jackknife_stats = np.array([func(np.delete(sample, i)) for i in range(sample_size)])
+        rng = tqdm(range(sample_size)) if progress_bar else range(sample_size)
+        jackknife_stats = np.array([func(np.delete(sample, i)) for i in rng])
         mean_jackknife_stats = np.mean(jackknife_stats)
         num = np.sum((mean_jackknife_stats - jackknife_stats) ** 3)
         denom = 6 * (np.sum((mean_jackknife_stats - jackknife_stats) ** 2) ** (3/2))
