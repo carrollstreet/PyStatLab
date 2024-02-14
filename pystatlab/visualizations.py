@@ -102,7 +102,7 @@ def mosaic_plot(rc_table, residuals=None, title=None):
                       legend_title_text=rc_table.index.name)
     fig.show()
 
-def pareto_chart(collection, title=None, limit=None):
+def pareto_chart(collection, title=None, limit=None, layout_params={}):
     """
     Generates a Pareto chart from a given collection of data. The Pareto chart combines a bar chart and 
     a line graph, where individual values are represented in descending order by bars, and the cumulative 
@@ -130,11 +130,6 @@ def pareto_chart(collection, title=None, limit=None):
     - The Pareto chart is useful for identifying the 'vital few' categories that account for the most 
       occurrences.
     - This function utilizes Plotly's graphing library for visualization.
-
-    Example
-    -------
-    >>> data = pd.Series(['A', 'B', 'A', 'C', 'A', 'B', 'A'])
-    >>> p
     """
     if limit and not isinstance(limit, int):
         raise TypeError('Limit must be int data type')
@@ -167,7 +162,8 @@ def pareto_chart(collection, title=None, limit=None):
                               'overlaying': 'y',
                               'position': 1, 
                               'side': 'right',
-                              'tickformat':'.1%'})
+                              'tickformat':'.1%'},
+                     **layout_params)
 
     fig.show()
 
