@@ -102,7 +102,7 @@ def mosaic_plot(rc_table, residuals=None, title=None):
                       legend_title_text=rc_table.index.name)
     fig.show()
 
-def pareto_chart(collection, title=None):
+def pareto_chart(collection, title=None, limit=None):
     """
     Generates a Pareto chart from a given collection of data. The Pareto chart combines a bar chart and 
     a line graph, where individual values are represented in descending order by bars, and the cumulative 
@@ -115,6 +115,8 @@ def pareto_chart(collection, title=None):
         or discrete data where frequency of occurrence matters.
     title : str, optional
         The title of the chart. If None, no title is displayed.
+    limit : int
+        How many values to display
 
     Returns
     -------
@@ -134,12 +136,15 @@ def pareto_chart(collection, title=None):
     >>> data = pd.Series(['A', 'B', 'A', 'C', 'A', 'B', 'A'])
     >>> p
     """
+    if limit and not isinstance(limit, int):
+        raise TypeError('Limit must be int data type')
+        
     collection = pd.Series(collection)
     counts = (collection.value_counts().to_frame('counts')
               .join(collection
                     .value_counts(normalize=True)
                     .cumsum()
-                    .to_frame('ratio')))
+                    .to_frame('ratio')))[:limit]
 
     fig = go.Figure([go.Bar(x=counts.index, 
                             y=counts['counts'], 
