@@ -373,7 +373,7 @@ class Bootstrap(ParentTestInterface):
         self.func = func
         super().__init__(confidence_level=confidence_level, n_resamples=n_resamples, random_state=random_state)
 
-    def resample(self, *samples, ind=True, ratio=False, progress_bar=False):
+    def resample(self, *samples, match_max_length=True, ind=True, ratio=False, progress_bar=False):
         """
         Performs the resampling process on the given samples.
 
@@ -381,13 +381,17 @@ class Bootstrap(ParentTestInterface):
         ----------
         *samples : array-like
             The samples to be resampled.
+        match_max_length : bool, default=True
+            If True, bootstrap samples are created with a size equal to the maximum length between the control and test groups.
+            If False, bootstrap samples maintain the original proportion sizes of the groups. 
+            Note: When `ind` is False, `match_max_length` has no effect.
         ind : bool, default=True
             Whether the samples are independent.
         ratio : bool, default=False
             Whether to perform test for ratio metric type. If True, `func` are not used.
         progress_bar : bool, default=False
             Whether to display a progress bar during resampling.
-
+            
         Returns
         -------
         dict
@@ -396,12 +400,17 @@ class Bootstrap(ParentTestInterface):
         np.random.seed(self.random_state)
         rng = tqdm(range(self.n_resamples)) if progress_bar else range(self.n_resamples)
 
-        def _generate_indices(size, high_a, high_b, ind):
-            a = np.random.randint(low=0, high=high_a, size=size)
+        def _generate_indices(size_a, size_b, ind, match_max_length):
+            if match_max_length:
+                sample_size_a = sample_size_b = max(size_a, size_b)
+            else:
+                sample_size_a, sample_size_b = size_a, size_b
+            
+            a = np.random.randint(low=0, high=size_a, size=sample_size_a)
             if not ind:
                 return a, a
             else:
-                b = np.random.randint(low=0, high=high_b, size=size)
+                b = np.random.randint(low=0, high=size_b, size=sample_size_b)
                 return a, b
 
         def _rel_size_comrarison(size_a, size_b):
@@ -414,13 +423,12 @@ class Bootstrap(ParentTestInterface):
             else:
                 sample_a, sample_b = np.asarray(samples[0]), np.asarray(samples[1])
                 size_a, size_b = sample_a.shape[0], sample_b.shape[0]
-                max_size = max(size_a, size_b)
                 _rel_size_comrarison(size_a, size_b)
                 self.uplift = self._compute_uplift(self.func(sample_a),
                                                    self.func(sample_b))
                 resample_data = []
                 for i in rng:
-                    ids_a, ids_b = _generate_indices(size=max_size, high_a=size_a, high_b=size_b, ind=ind)
+                    ids_a, ids_b = _generate_indices(size_a=size_a, size_b=size_b, ind=ind,match_max_length=match_max_length)
                     resample_data.append([self.func(sample_a[ids_a]), self.func(sample_b[ids_b])])
         else:
             if len(samples) != 4:
@@ -429,13 +437,12 @@ class Bootstrap(ParentTestInterface):
             numerator_a, denominator_a = np.asarray(samples[0]), np.asarray(samples[1])
             numerator_b, denominator_b = np.asarray(samples[2]), np.asarray(samples[3])
             size_a, size_b = numerator_a.shape[0], numerator_b.shape[0]
-            max_size = max(size_a, size_b)
             _rel_size_comrarison(size_a, size_b)
             self.uplift = self._compute_uplift(np.sum(numerator_a) / np.sum(denominator_a),
                                              np.sum(numerator_b) / np.sum(denominator_b))
             resample_data = []
             for i in rng:
-                ids_a, ids_b = _generate_indices(size=max_size, high_a=size_a, high_b=size_b, ind=ind)
+                ids_a, ids_b = _generate_indices(size_a=size_a, size_b=size_b, ind=ind,match_max_length=match_max_length)
                 resample_data.append([np.sum(numerator_a[ids_a]) / np.sum(denominator_a[ids_a]),
                                        np.sum(numerator_b[ids_b]) / np.sum(denominator_b[ids_b])])
 
