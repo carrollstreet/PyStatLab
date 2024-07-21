@@ -751,6 +751,9 @@ class ResamplingTtest(ParentTestInterface):
             plt.show()
 
 
+import numpy as np
+from tqdm import tqdm
+
 def permutation_ind(*samples,
                     func=np.mean, 
                     confidence_level=0.95,
@@ -818,33 +821,37 @@ def permutation_ind(*samples,
         elif len(samples[0]) != len(samples[1]) or len(samples[2]) != len(samples[3]):
             raise ValueError('Numerator and denominator must be the same length')
         
-        sample_a, sample_b = np.column_stack((np.asarray(samples[0]), np.asarray(samples[1]))),\
-                             np.column_stack((np.asarray(samples[2]), np.asarray(samples[3])))
+        numerator_a, denominator_a = np.asarray(samples[0]), np.asarray(samples[1])
+        numerator_b, denominator_b = np.asarray(samples[2]), np.asarray(samples[3])
         
+        sample_a = np.column_stack((numerator_a, denominator_a))
+        sample_b = np.column_stack((numerator_b, denominator_b))
+
         def func(sample):
-            return sum(sample[:,0]) / sum(sample[:,1])
+            return np.sum(sample[:, 0]) / np.sum(sample[:, 1])
 
     observed_diff = func(sample_b) - func(sample_a)
     uplift = observed_diff / func(sample_a)
-    combined = np.concatenate((sample_a, sample_b))
+    
+    combined = np.concatenate((sample_a, sample_b), axis=0)
     size_a = sample_a.shape[0]
     size_combined = combined.shape[0]
-    ids = np.arange(size_combined)
     
-    diff_lst = []
+    diff_lst = np.zeros(n_resamples)
+    indices = np.arange(size_combined)
     
-    for _ in rng:
-        np.random.shuffle(ids)
-        perm_sample_a = combined[ids][:size_a]
-        perm_sample_b = combined[ids][size_a:]
-        perm_diff = func(perm_sample_b) - func(perm_sample_a)
-        diff_lst.append(perm_diff)
+    for i in rng:
+        np.random.shuffle(indices)
+        perm_sample_a = combined[indices[:size_a]]
+        perm_sample_b = combined[indices[size_a:]]
+        diff_lst[i] = func(perm_sample_b) - func(perm_sample_a)
 
-    diff_lst = np.array(diff_lst)
-    p = (np.sum(observed_diff > diff_lst) + 1) / (n_resamples + 1) 
-    pvalue = min(2*p, 2-2*p) if two_sided else p
+    p = (np.sum(observed_diff > diff_lst) + 1) / (n_resamples + 1)
+    pvalue = min(2 * p, 2 - 2 * p) if two_sided else p
     permutation_diff_ci = np.quantile(diff_lst, q=[left_quant, right_quant])
+    
     return {'pvalue': pvalue, 'uplift': uplift, 'diff': observed_diff, 'permutation_diff_ci': permutation_diff_ci}
+
 
 
 def permutation_did(*values, group_label, experiment_stage_label, ratio=False, two_sided=True, n_resamples=10_000, random_state=None):
