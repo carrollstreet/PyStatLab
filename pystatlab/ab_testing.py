@@ -751,9 +751,6 @@ class ResamplingTtest(ParentTestInterface):
             plt.show()
 
 
-import numpy as np
-from tqdm import tqdm
-
 def permutation_ind(*samples,
                     func=np.mean, 
                     confidence_level=0.95,
