@@ -428,23 +428,23 @@ class Bootstrap(ParentTestInterface):
                                                    self.func(sample_b))
                 resample_data = []
                 for i in rng:
-                    ids_a, ids_b = _generate_indices(size_a=size_a, size_b=size_b, ind=ind,match_max_length=match_max_length)
+                    ids_a, ids_b = _generate_indices(size_a=size_a, size_b=size_b, ind=ind, match_max_length=match_max_length)
                     resample_data.append([self.func(sample_a[ids_a]), self.func(sample_b[ids_b])])
         else:
             if len(samples) != 4:
                 raise ValueError(
-                            'For ratio metrics you must pass four samples: numerator and denominator for control and treatment groups')
+                            'For ratio metrics you must pass four samples: numerator and denominator for control, then for treatment groups')
             numerator_a, denominator_a = np.asarray(samples[0]), np.asarray(samples[1])
             numerator_b, denominator_b = np.asarray(samples[2]), np.asarray(samples[3])
             size_a, size_b = numerator_a.shape[0], numerator_b.shape[0]
-            _rel_size_comrarison(size_a, size_b)
+            _rel_size_comrarison(size_a, size_b)                
             self.uplift = self._compute_uplift(np.sum(numerator_a) / np.sum(denominator_a),
                                              np.sum(numerator_b) / np.sum(denominator_b))
             resample_data = []
             for i in rng:
                 ids_a, ids_b = _generate_indices(size_a=size_a, size_b=size_b, ind=ind,match_max_length=match_max_length)
                 resample_data.append([np.sum(numerator_a[ids_a]) / np.sum(denominator_a[ids_a]),
-                                       np.sum(numerator_b[ids_b]) / np.sum(denominator_b[ids_b])])
+                                      np.sum(numerator_b[ids_b]) / np.sum(denominator_b[ids_b])])
 
         self._resample_data = np.array(resample_data)
         self.diffs = self._resample_data[:, 1] - self._resample_data[:, 0]
@@ -757,6 +757,7 @@ def permutation_ind(*samples,
                     n_resamples=10000,
                     two_sided=True, 
                     random_state=None, 
+                    ratio=False,
                     progress_bar=False, 
                     ):
     """
@@ -770,8 +771,11 @@ def permutation_ind(*samples,
     ----------
     func : function, default=np.mean
         Function used to compute the test statistic (e.g., np.mean, np.median).
+        Note: This parameter has no effect when ratio is True.
     samples : tuple of array-like
-        The two samples to compare.
+        The samples to compare. For non-ratio metrics, two samples should be 
+        provided. For ratio metrics, four samples should be provided: numerator 
+        and denominator for control, then for treatment groups.
     confidence_level : float, default=0.95
         Confidence level for computing the confidence interval of the difference.
     n_resamples : int, default=10000
@@ -782,6 +786,8 @@ def permutation_ind(*samples,
         Seed for the random number generator.
     progress_bar : bool, default=False
         Display a progress bar during computation.
+    ratio : bool, default=False
+        If True, the test is performed on ratio metrics (e.g., conversion rates).
 
     Returns
     -------
@@ -792,26 +798,45 @@ def permutation_ind(*samples,
     Raises
     ------
     ValueError
-        If the number of samples provided is not equal to 2.
+        If the number of samples provided is not equal to 2 for non-ratio metrics,
+        or not equal to 4 for ratio metrics.
+        If the lengths of numerators and denominators do not match for ratio metrics.
     """
-    if len(samples) != 2:
-        raise ValueError('You must pass only two samples')
-        
-    sample_a, sample_b = np.asarray(samples[0]), np.asarray(samples[1]) 
-    size_a = sample_a.shape[0]
-    observed_diff = func(sample_b) - func(sample_a)
-    combined = np.concatenate((sample_a, sample_b))
-    uplift = observed_diff / func(sample_a)
-    left_quant, right_quant =  (1 - confidence_level) / 2, 1 - (1 - confidence_level) / 2
-
     np.random.seed(random_state)
-
-    diff_lst = []
+    left_quant, right_quant =  (1 - confidence_level) / 2, 1 - (1 - confidence_level) / 2
     rng = tqdm(range(n_resamples)) if progress_bar else range(n_resamples)
+    
+    if not ratio:
+        if len(samples) != 2:
+            raise ValueError('You must pass only two samples for non ratio metrics')
+            
+        sample_a, sample_b = np.asarray(samples[0]), np.asarray(samples[1]) 
+        
+    else:
+        if len(samples) != 4:
+            raise ValueError('For ratio metrics you must pass four samples: numerator and denominator for control, then for treatment groups')
+        elif len(samples[0]) != len(samples[1]) or len(samples[2]) != len(samples[3]):
+            raise ValueError('Numerator and denominator must be the same length')
+        
+        sample_a, sample_b = np.column_stack((np.asarray(samples[0]), np.asarray(samples[1]))),\
+                             np.column_stack((np.asarray(samples[2]), np.asarray(samples[3])))
+        
+        def func(sample):
+            return sum(sample[:,0]) / sum(sample[:,1])
+
+    observed_diff = func(sample_b) - func(sample_a)
+    uplift = observed_diff / func(sample_a)
+    combined = np.concatenate((sample_a, sample_b))
+    size_a = sample_a.shape[0]
+    size_combined = combined.shape[0]
+    ids = np.arange(size_combined)
+    
+    diff_lst = []
+    
     for _ in rng:
-        np.random.shuffle(combined)
-        perm_sample_a = combined[:size_a]
-        perm_sample_b = combined[size_a:]
+        np.random.shuffle(ids)
+        perm_sample_a = combined[ids][:size_a]
+        perm_sample_b = combined[ids][size_a:]
         perm_diff = func(perm_sample_b) - func(perm_sample_a)
         diff_lst.append(perm_diff)
 
@@ -819,7 +844,8 @@ def permutation_ind(*samples,
     p = (np.sum(observed_diff > diff_lst) + 1) / (n_resamples + 1) 
     pvalue = min(2*p, 2-2*p) if two_sided else p
     permutation_diff_ci = np.quantile(diff_lst, q=[left_quant, right_quant])
-    return {'pvalue': pvalue, 'uplift': uplift, 'stat': observed_diff, 'permutation_diff_ci': permutation_diff_ci}
+    return {'pvalue': pvalue, 'uplift': uplift, 'diff': observed_diff, 'permutation_diff_ci': permutation_diff_ci}
+
 
 def permutation_did(*values, group_label, experiment_stage_label, ratio=False, two_sided=True, n_resamples=10_000, random_state=None):
     """
