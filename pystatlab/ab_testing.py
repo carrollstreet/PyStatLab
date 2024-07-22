@@ -757,7 +757,6 @@ def permutation_ind(*samples,
                     n_resamples=10000,
                     two_sided=True, 
                     random_state=None, 
-                    ratio=False,
                     progress_bar=False, 
                     ):
     """
@@ -771,7 +770,7 @@ def permutation_ind(*samples,
     ----------
     func : function, default=np.mean
         Function used to compute the test statistic (e.g., np.mean, np.median).
-        Note: This parameter has no effect when ratio is True.
+        Note: This parameter has no effect when four samples (ratio metrics) are provided.
     samples : tuple of array-like
         The samples to compare. For non-ratio metrics, two samples should be 
         provided. For ratio metrics, four samples should be provided: numerator 
@@ -786,8 +785,6 @@ def permutation_ind(*samples,
         Seed for the random number generator.
     progress_bar : bool, default=False
         Display a progress bar during computation.
-    ratio : bool, default=False
-        If True, the test is performed on ratio metrics (e.g., conversion rates).
 
     Returns
     -------
@@ -806,17 +803,14 @@ def permutation_ind(*samples,
     left_quant, right_quant =  (1 - confidence_level) / 2, 1 - (1 - confidence_level) / 2
     rng = tqdm(range(n_resamples)) if progress_bar else range(n_resamples)
     
-    if not ratio:
-        if len(samples) != 2:
-            raise ValueError('You must pass only two samples for non ratio metrics')
-            
+    if len(samples) == 2:
         sample_a, sample_b = np.asarray(samples[0]), np.asarray(samples[1]) 
         
-    else:
-        if len(samples) != 4:
-            raise ValueError('For ratio metrics you must pass four samples: numerator and denominator for control, then for treatment groups')
-        elif len(samples[0]) != len(samples[1]) or len(samples[2]) != len(samples[3]):
-            raise ValueError('Numerator and denominator must be the same length')
+    elif len(samples) == 4:            
+        if len(samples[0]) != len(samples[1]) or len(samples[2]) != len(samples[3]):
+            raise ValueError(
+                "Numerator and denominator must be the same length"
+            )
         
         numerator_a, denominator_a = np.asarray(samples[0]), np.asarray(samples[1])
         numerator_b, denominator_b = np.asarray(samples[2]), np.asarray(samples[3])
@@ -826,6 +820,11 @@ def permutation_ind(*samples,
 
         def func(sample):
             return np.sum(sample[:, 0]) / np.sum(sample[:, 1])
+    else:
+        raise ValueError(
+            "You must pass only two samples for non-ratio metrics, or four samples for ratio metrics: "
+            "numerator and denominator for control, then for treatment groups"
+        )
 
     observed_diff = func(sample_b) - func(sample_a)
     uplift = observed_diff / func(sample_a)
@@ -834,21 +833,20 @@ def permutation_ind(*samples,
     size_a = sample_a.shape[0]
     size_combined = combined.shape[0]
     
-    diff_lst = np.zeros(n_resamples)
+    diff_arr = np.zeros(n_resamples)
     indices = np.arange(size_combined)
     
     for i in rng:
         np.random.shuffle(indices)
         perm_sample_a = combined[indices[:size_a]]
         perm_sample_b = combined[indices[size_a:]]
-        diff_lst[i] = func(perm_sample_b) - func(perm_sample_a)
+        diff_arr[i] = func(perm_sample_b) - func(perm_sample_a)
 
-    p = (np.sum(observed_diff > diff_lst) + 1) / (n_resamples + 1)
+    p = (np.sum(observed_diff > diff_arr) + 1) / (n_resamples + 1)
     pvalue = min(2 * p, 2 - 2 * p) if two_sided else p
-    permutation_diff_ci = np.quantile(diff_lst, q=[left_quant, right_quant])
+    permutation_diff_ci = np.quantile(diff_arr, q=[left_quant, right_quant])
     
     return {'pvalue': pvalue, 'uplift': uplift, 'diff': observed_diff, 'permutation_diff_ci': permutation_diff_ci}
-
 
 
 def permutation_did(*values, group_label, experiment_stage_label, ratio=False, two_sided=True, n_resamples=10_000, random_state=None):
