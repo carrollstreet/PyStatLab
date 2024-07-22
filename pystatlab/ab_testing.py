@@ -357,7 +357,8 @@ class Bootstrap(ParentTestInterface):
     Parameters
     ----------
     func : function, default=np.mean
-        The statistical function to apply to the samples. Used only when ratio=False in resample method.
+        The statistical function to apply to the samples.
+        Note: This parameter is not used when four samples are provided.
     confidence_level : float, default=0.95
         The confidence level for calculating confidence intervals.
     n_resamples : int, default=10000
@@ -365,7 +366,6 @@ class Bootstrap(ParentTestInterface):
     random_state : int, optional
         The seed for the random number generator to ensure reproducibility.
     """
-    
     def __init__(self, func=np.mean, confidence_level=0.95, n_resamples=10_000, random_state=None):
         """
         Constructor for the Bootstrap class.
@@ -373,29 +373,36 @@ class Bootstrap(ParentTestInterface):
         self.func = func
         super().__init__(confidence_level=confidence_level, n_resamples=n_resamples, random_state=random_state)
 
-    def resample(self, *samples, match_max_length=True, ind=True, ratio=False, progress_bar=False):
+    def resample(self, *samples, match_max_length=False, ind=True, progress_bar=False):
         """
         Performs the resampling process on the given samples.
 
         Parameters
         ----------
         *samples : array-like
-            The samples to be resampled.
-        match_max_length : bool, default=True
+            The samples to be resampled. For non-ratio metrics, two samples should be provided.
+            For ratio metrics, four samples should be provided: numerator and denominator for control,
+            then for treatment groups.
+        match_max_length : bool, default=False
             If True, bootstrap samples are created with a size equal to the maximum length between the control and test groups.
-            If False, bootstrap samples maintain the original proportion sizes of the groups. 
+            If False, bootstrap samples maintain the original proportion sizes of the groups.
             Note: When `ind` is False, `match_max_length` has no effect.
         ind : bool, default=True
             Whether the samples are independent.
-        ratio : bool, default=False
-            Whether to perform test for ratio metric type. If True, `func` are not used.
         progress_bar : bool, default=False
             Whether to display a progress bar during resampling.
-            
+
         Returns
         -------
         dict
             A dictionary containing the test parameters after resampling.
+        
+        Raises
+        ------
+        ValueError
+            If the number of samples provided is not equal to 2 for non-ratio metrics,
+            or not equal to 4 for ratio metrics.
+            If the lengths of numerators and denominators do not match for ratio metrics.
         """
         np.random.seed(self.random_state)
         rng = tqdm(range(self.n_resamples)) if progress_bar else range(self.n_resamples)
@@ -417,36 +424,40 @@ class Bootstrap(ParentTestInterface):
             if not ind and size_a != size_b:
                 raise ValueError('Relative samples must be same sample size')
 
-        if not ratio:
-            if len(samples) != 2:
-                raise ValueError('For non ratio metrics you must pass two samples')
-            else:
-                sample_a, sample_b = np.asarray(samples[0]), np.asarray(samples[1])
-                size_a, size_b = sample_a.shape[0], sample_b.shape[0]
-                _rel_size_comrarison(size_a, size_b)
-                self.uplift = self._compute_uplift(self.func(sample_a),
-                                                   self.func(sample_b))
-                resample_data = []
-                for i in rng:
-                    ids_a, ids_b = _generate_indices(size_a=size_a, size_b=size_b, ind=ind, match_max_length=match_max_length)
-                    resample_data.append([self.func(sample_a[ids_a]), self.func(sample_b[ids_b])])
-        else:
-            if len(samples) != 4:
+        if len(samples) == 2:
+            sample_a, sample_b = np.asarray(samples[0]), np.asarray(samples[1])
+            size_a, size_b = sample_a.shape[0], sample_b.shape[0]
+            _rel_size_comrarison(size_a, size_b)
+            self.uplift = self._compute_uplift(self.func(sample_a), self.func(sample_b))
+        elif len(samples) == 4:
+            if len(samples[0]) != len(samples[1]) or len(samples[2]) != len(samples[3]):
                 raise ValueError(
-                            'For ratio metrics you must pass four samples: numerator and denominator for control, then for treatment groups')
+                    "Numerator and denominator must be the same length"
+                )
+        
             numerator_a, denominator_a = np.asarray(samples[0]), np.asarray(samples[1])
             numerator_b, denominator_b = np.asarray(samples[2]), np.asarray(samples[3])
+            sample_a = np.column_stack((numerator_a, denominator_a))
+            sample_b = np.column_stack((numerator_b, denominator_b))
+
+            def func(sample):
+                return np.sum(sample[:, 0]) / np.sum(sample[:, 1])
+
+            self.func = func
             size_a, size_b = numerator_a.shape[0], numerator_b.shape[0]
             _rel_size_comrarison(size_a, size_b)                
-            self.uplift = self._compute_uplift(np.sum(numerator_a) / np.sum(denominator_a),
-                                             np.sum(numerator_b) / np.sum(denominator_b))
-            resample_data = []
-            for i in rng:
-                ids_a, ids_b = _generate_indices(size_a=size_a, size_b=size_b, ind=ind,match_max_length=match_max_length)
-                resample_data.append([np.sum(numerator_a[ids_a]) / np.sum(denominator_a[ids_a]),
-                                      np.sum(numerator_b[ids_b]) / np.sum(denominator_b[ids_b])])
+            self.uplift = self._compute_uplift(self.func(sample_a),self.func(sample_b))
+        else:
+            raise ValueError(
+                "You must pass only two samples for non-ratio metrics, or four samples for ratio metrics: "
+                "numerator and denominator for control, then for treatment groups"
+            )
 
-        self._resample_data = np.array(resample_data)
+        self._resample_data = np.zeros((self.n_resamples, 2))
+        for i in rng:
+            ids_a, ids_b = _generate_indices(size_a=size_a, size_b=size_b, ind=ind,match_max_length=match_max_length)
+            self._resample_data[i] = [self.func(sample_a[ids_a]),self.func(sample_b[ids_b])]
+            
         self.diffs = self._resample_data[:, 1] - self._resample_data[:, 0]
         self.a_ci = self._compute_ci(self._resample_data[:, 0])
         self.b_ci = self._compute_ci(self._resample_data[:, 1])
@@ -510,6 +521,7 @@ class Bootstrap(ParentTestInterface):
                                             uplift=self.uplift, 
                                             )
             plt.show()
+
 
 class QuantileBootstrap(ParentTestInterface):
     """
