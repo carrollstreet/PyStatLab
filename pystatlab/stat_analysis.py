@@ -242,7 +242,7 @@ def jackknife_estim(sample, func=np.mean, confidence_level=0.95):
     se = ((sample_size - 1) * np.mean((jackknife_stats - mean_jacknife_stat) ** 2)) ** .5
     return {'estim':estim, 'bias':bias, 'se':se, 'ci':(estim - z * se, estim + z * se)}
 
-def bootstrap_ci(sample, func=np.mean, confidence_level=0.95, n_resamples=10000, method='percentile', return_dist=False, progress_bar=True, random_state=None):
+def bootstrap_ci(*samples, func=np.mean, confidence_level=0.95, n_resamples=10000, method='percentile', return_dist=False, progress_bar=True, random_state=None):
     """
     Calculate bootstrap confidence intervals for a statistic of a sample.
 
@@ -276,20 +276,35 @@ def bootstrap_ci(sample, func=np.mean, confidence_level=0.95, n_resamples=10000,
     ----
     Close to https://scipy.github.io/devdocs/reference/generated/scipy.stats.bootstrap.html
     """
+
     np.random.seed(random_state)
-    sample = np.asarray(sample)
-    sample_size = sample.shape[0]
-    sample_stat = func(sample)
     lower, upper = (1 - confidence_level) / 2, 1 - (1 - confidence_level) / 2
     rng = tqdm(range(n_resamples)) if progress_bar else range(n_resamples)
+    
+    if len(samples) == 1:
+        sample = np.asarray(samples[0])
+    elif len(samples) == 2:            
+        if len(samples[0]) != len(samples[1]):
+            raise ValueError(
+                "Numerator and denominator must be the same length"
+            )
+        numerator, denominator = np.asarray(samples[0]), np.asarray(samples[1])
+        sample = np.column_stack((numerator, denominator))
+        
+        def func(sample):
+            return np.sum(sample[:, 0]) / np.sum(sample[:, 1])
+            
+    sample_size = sample.shape[0]
+    sample_stat = func(sample)
+
     bootstrap_stats = []
     for i in rng:
         bootstrap_stats.append(func(sample[np.random.randint(0,sample_size,sample_size)]))
     
     if method == 'percentile':
-        result = tuple(np.quantile(bootstrap_stats, q=[lower, upper]))
+        result = tuple([sample_stat, np.quantile(bootstrap_stats, q=[lower, upper])])
     elif method == 'pivotal':
-        result = tuple(np.quantile(2*sample_stat - bootstrap_stats, q=[lower, upper]))
+        result = tuple([sample_stat, np.quantile(2*sample_stat - bootstrap_stats, q=[lower, upper])])
     elif method == 'bca':
         z0 = st.norm.ppf((np.sum(bootstrap_stats < sample_stat)) / n_resamples)
         rng = tqdm(range(sample_size)) if progress_bar else range(sample_size)
@@ -301,7 +316,7 @@ def bootstrap_ci(sample, func=np.mean, confidence_level=0.95, n_resamples=10000,
         ppf_l, ppf_u = st.norm.ppf(lower), st.norm.ppf(upper)
         a_1 = st.norm.cdf(z0 + (z0 + ppf_l) / (1 - acc * (z0 + ppf_l)))
         a_2 = st.norm.cdf(z0 + (z0 + ppf_u) / (1 - acc * (z0 + ppf_u)))
-        result = tuple(np.quantile(bootstrap_stats, q=[a_1,a_2]))
+        result = tuple([sample_stat, np.quantile(bootstrap_stats, q=[a_1,a_2])])
     else:
         raise ValueError(f'Passed {method}. Please use percentile, pivotal, or bca.')
 
