@@ -350,6 +350,76 @@ def expected_proportion(effect_size, proportion_1):
     uplift = (proportion_2 - proportion_1) / proportion_1
     return {'proportion_2':proportion_2, 'uplift':uplift}
 
+def fixed_power(args=(), nobs1=None, alpha=0.05, ratio=1, proportion=False):
+    """
+    Computes the statistical power of a two-sample t-test or a test of proportions.
+
+    Parameters:
+    -----------
+    args : tuple
+        A tuple of two arrays or two single values.
+        - If `proportion` is set to `True`, `args` should be two proportion values representing
+          the proportions of two groups.
+        - If `proportion` is set to `False`, `args` should be a tuple of two arrays:
+          - The first array should contain the means of the two groups.
+          - The second array should contain the standard deviations of the two groups.
+
+    nobs1 : int
+        The number of observations (sample size) in the first group.
+        This parameter is required and cannot be `None`.
+
+    alpha : float, optional, default=0.05
+        The significance level of the test. It represents the probability of a Type I error,
+        i.e., rejecting the null hypothesis when it is true. Common values are 0.05, 0.01, etc.
+
+    ratio : float, optional, default=1
+        The ratio of the sample sizes of the second group relative to the first group.
+        For example, if `ratio = 2`, the second group will have twice as many observations as the first group.
+
+    proportion : bool, optional, default=False
+        Indicates whether the input values in `args` represent proportions.
+        - If set to `True`, the function computes the power for a two-proportion z-test.
+        - If set to `False`, the function computes the power for a two-sample t-test
+          based on the means and standard deviations provided in `args`.
+
+    Returns:
+    --------
+    power : float
+        The computed power of the statistical test.
+
+    Raises:
+    -------
+    TypeError
+        If `nobs1` is not provided or set to `None`.
+    ValueError
+        - If `args` does not contain exactly two elements.
+        - If `proportion` is `True` and the provided `args` are not valid proportion values.
+        - If `proportion` is `False` and the provided `args` are not valid mean and standard deviation arrays.
+
+    Examples:
+    ---------
+    # Example 1: Compute power for two means
+    means = [0.5, 0.8]  # mean values of two groups
+    stds = [0.1, 0.1]  # standard deviations of two groups
+    power = fixed_power(args=(means, stds), nobs1=30)
+
+    # Example 2: Compute power for two proportions
+    prop1, prop2 = 0.4, 0.6  # proportions of two groups
+    power = fixed_power(args=(prop1, prop2), nobs1=100, proportion=True)
+
+    This function is useful for estimating the power of a test before data collection
+    or analyzing the sensitivity of an existing test design.
+    """
+    if not nobs1:
+        raise TypeError("fixed_power() missing 1 required positional argument: 'nobs1'")
+    if len(args) != 2:
+        raise ValueError('You must pass two args: two proportion values if proportion is True or mean array and std array with two values in each')
+    if proportion:
+        effect_size = proportion_effectsize(args[0], args[1])
+    else:
+        effect_size = cohens_d(*args[0], *args[1], from_samples=False)
+    return tt_ind_solve_power(effect_size=effect_size, alpha=alpha, nobs1=nobs1, ratio=ratio)
+
 def normal_1samp_size(sigma, d, confidence_level=0.95):
     """
     Calculates the required sample size to estimate the mean of a normally distributed population within a desired 
