@@ -1,4 +1,5 @@
 # PyStatLab
+Python library designed to streamline common and advanced analytical tasks in data analysis, statistics, and machine learning. It offers a broad range of tools for statistical testing, A/B test analysis, optimization algorithms, visualizations and mathematical computations.
 
 ## Install
 ```bash
