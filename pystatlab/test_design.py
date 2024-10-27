@@ -2,7 +2,7 @@ import numpy as np
 from statsmodels.stats.proportion import proportions_ztest
 from statsmodels.stats.proportion import proportion_effectsize
 from statsmodels.stats.power import tt_ind_solve_power
-from utility import ParallelResampler
+from pystatlab.utility import ParallelResampler
 import scipy.stats as st
 import matplotlib.pyplot as plt
 import seaborn as sns
