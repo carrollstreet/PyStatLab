@@ -1,6 +1,6 @@
 import numpy as np
 import scipy.stats as st
-from tqdm import tqdm
+from tools import ParallelResampler
 
 def correlation_ratio(values, categories):
     """
@@ -242,44 +242,76 @@ def jackknife_estim(sample, func=np.mean, confidence_level=0.95):
     se = ((sample_size - 1) * np.mean((jackknife_stats - mean_jacknife_stat) ** 2)) ** .5
     return {'estim':estim, 'bias':bias, 'se':se, 'ci':(estim - z * se, estim + z * se)}
 
-def bootstrap_ci(*samples, func=np.mean, confidence_level=0.95, n_resamples=10000, method='percentile', return_dist=False, progress_bar=True, random_state=None):
+def bootstrap_ci(*samples, 
+                 func=np.mean, 
+                 confidence_level=0.95, 
+                 n_resamples=10000,
+                 method='percentile', 
+                 return_dist=False,
+                 n_jobs=-1,
+                 progress_bar=False, 
+                 random_state=None):
     """
     Calculate bootstrap confidence intervals for a statistic of a sample.
 
+    This function generates bootstrap resamples from the provided sample(s) to estimate 
+    the confidence interval of a given statistic using various methods.
+
     Parameters
     ----------
-    sample : array-like
-        The original sample data.
+    samples : tuple of array-like
+        The sample data to compute the confidence intervals. For non-ratio metrics, 
+        provide one sample. For ratio metrics, provide two samples: numerator and denominator.
     func : function, default=np.mean
-        The statistical function to apply to the sample and bootstrap samples.
+        The statistical function to apply to the original sample and each bootstrap sample.
+        Common choices include np.mean or np.median. This parameter is ignored when two 
+        samples (ratio metrics) are provided.
     confidence_level : float, default=0.95
-        The confidence level for the confidence interval calculation.
+        The desired confidence level for the confidence interval.
     n_resamples : int, default=10000
         The number of bootstrap resamples to generate.
     method : str, default='percentile'
-        The bootstrap method to use ('percentile', 'pivotal', 'bca').
+        The method to compute the confidence interval. Options are:
+        - 'percentile': Uses percentiles of the bootstrap distribution.
+        - 'pivotal': Adjusts percentiles relative to the observed statistic.
+        - 'bca': Bias-Corrected and Accelerated interval, which adjusts for bias 
+          and skewness in the bootstrap distribution.
     return_dist : bool, default=False
-        If True, returns the bootstrap sample distribution along with the CI.
+        If True, returns the bootstrap sample distribution along with the confidence interval.
+    n_jobs : int, default=-1
+        The number of jobs to run in parallel. Use -1 to utilize all available cores.
+    progress_bar : bool, default=False
+        Whether to display a progress bar during the resampling process. Effective only if `n_jobs` is 1.
     random_state : int, optional
-        The seed for the random number generator.
+        Seed for the random number generator to ensure reproducibility.
 
     Returns
     -------
     tuple
-        The lower and upper bounds of the confidence interval.
+        A tuple containing:
+        - The observed statistic.
+        - A tuple with the lower and upper bounds of the confidence interval.
+        If `return_dist` is True, the bootstrap distribution is also included.
 
-    Reference
-    ---------
+    Raises
+    ------
+    ValueError
+        If the number of samples is not equal to 1 for non-ratio metrics, or not equal to 2 for ratio metrics.
+        If the lengths of numerators and denominators do not match for ratio metrics.
+
+    Notes
+    -----
+    This function is similar to the implementation in SciPy's https://scipy.github.io/devdocs/reference/generated/scipy.stats.bootstrap.html
+
+    References
+    ----------
     http://users.stat.umn.edu/~helwig/notes/bootci-Notes.pdf
-
-    Note
-    ----
-    Close to https://scipy.github.io/devdocs/reference/generated/scipy.stats.bootstrap.html
     """
-
-    np.random.seed(random_state)
-    lower, upper = (1 - confidence_level) / 2, 1 - (1 - confidence_level) / 2
-    rng = tqdm(range(n_resamples)) if progress_bar else range(n_resamples)
+    pr = ParallelResampler(n_resamples=n_resamples, 
+                           random_state=random_state, 
+                           n_jobs=n_jobs, 
+                           progress_bar=progress_bar)
+    lower, upper = (1 - confidence_level) / 2, 1 - (1 - confidence_level) / 2    
     
     if len(samples) == 1:
         sample = np.asarray(samples[0])
@@ -297,18 +329,20 @@ def bootstrap_ci(*samples, func=np.mean, confidence_level=0.95, n_resamples=1000
     sample_size = sample.shape[0]
     sample_stat = func(sample)
 
-    bootstrap_stats = []
-    for i in rng:
-        bootstrap_stats.append(func(sample[np.random.randint(0,sample_size,sample_size)]))
-    
+    def _resample_func(seed):
+        return func(sample[seed.integers(0,sample_size,sample_size)])
+        
+    bootstrap_stats = pr.resample(_resample_func)
     if method == 'percentile':
         result = tuple([sample_stat, np.quantile(bootstrap_stats, q=[lower, upper])])
     elif method == 'pivotal':
         result = tuple([sample_stat, np.quantile(2*sample_stat - bootstrap_stats, q=[lower, upper])])
     elif method == 'bca':
+        def jackknife_stats_func(idx):
+            return func(np.delete(sample, idx, axis=0 if len(samples) == 2 else None))
+            
         z0 = st.norm.ppf((np.sum(bootstrap_stats < sample_stat)) / n_resamples)
-        rng = tqdm(range(sample_size)) if progress_bar else range(sample_size)
-        jackknife_stats = np.array([func(np.delete(sample, i)) for i in rng])
+        jackknife_stats = pr.map(jackknife_stats_func, range(sample_size))
         mean_jackknife_stats = np.mean(jackknife_stats)
         num = np.sum((mean_jackknife_stats - jackknife_stats) ** 3)
         denom = 6 * (np.sum((mean_jackknife_stats - jackknife_stats) ** 2) ** (3/2))
@@ -319,115 +353,126 @@ def bootstrap_ci(*samples, func=np.mean, confidence_level=0.95, n_resamples=1000
         result = tuple([sample_stat, np.quantile(bootstrap_stats, q=[a_1,a_2])])
     else:
         raise ValueError(f'Passed {method}. Please use percentile, pivotal, or bca.')
-
+    if n_jobs != 1:
+        pr.elapsed_time()
     return (result, bootstrap_stats) if return_dist else result
+
 
 class BootstrapWrapper:
     """
     A decorator class for applying bootstrap resampling to estimate confidence intervals 
     for statistics calculated from sample data.
 
-    Attributes:
-    -----------
+    Attributes
+    ----------
     confidence_level : float, optional
         The confidence level for the confidence interval estimation. Default is 0.95.
     n_resamples : int, optional
         The number of bootstrap resamples to generate. Default is 10,000.
+    n_jobs : int, optional
+        The number of parallel jobs to use for resampling. Default is -1 (uses all available cores).
     random_state : int, optional
         Seed for the random number generator to ensure reproducibility. Default is None.
     return_dist : bool, optional
         If True, returns both the confidence interval and the resampled statistics distribution. Default is False.
     progress_bar : bool, optional
-        If True, displays a progress bar during the bootstrap resampling. Default is True.
+        If True, displays a progress bar during the bootstrap resampling process. Effective only if `n_jobs` is 1.
 
-    Methods:
-    --------
-    __init__(self, confidence_level=0.95, n_resamples=10_000, random_state=None, return_dist=False, progress_bar=True)
+    Methods
+    -------
+    __init__(self, confidence_level=0.95, n_resamples=10_000, n_jobs=-1, random_state=None, return_dist=False, progress_bar=False)
         Initializes the BootstrapWrapper with specified attributes.
 
     _compute_ci(self, data)
         Computes the confidence interval from the bootstrap resampled statistics.
 
-    _get_idx(size)
-        Generates random indices for resampling, given the sample size.
+    _get_idx(seed, size)
+        Generates random indices for resampling, given the sample size and random seed.
 
     __call__(self, func)
         The main method that applies bootstrap resampling to the function `func` passed to the decorator.
         It wraps `func`, performing bootstrap resampling on its input data, and then applies `func`
         to each resampled dataset to compute the desired statistic.
 
-    Usage example:
-    --------------
-    @BootstrapWrapper()
-    def linear_reg_coef(x,y):
-        return np.polyfit(x,y, deg=1)[1]
+    Usage Example
+    -------------
+    @BootstrapWrapper(random_state=42)
+    def linear_reg_coef(x, y):
+        return np.polyfit(x, y, deg=1)[1]
 
-    # Now `linear_reg_coef` will return the 95% confidence interval of the slope coef based on bootstrap resampling.
+    # Now `linear_reg_coef` will return the 95% confidence interval of the slope coefficient
+    # based on bootstrap resampling.
 
-    Raises:
-    -------
+    Raises
+    ------
     TypeError
-        If any of the arguments passed to the decorated function is not iterable.
+        If any of the arguments passed to the decorated function are not iterable.
     """
-    def __init__(self, confidence_level=0.95, n_resamples=10_000, random_state=None, return_dist=False, progress_bar=True):
+    def __init__(self, confidence_level=0.95, n_resamples=10_000, n_jobs=-1, random_state=None, return_dist=False, progress_bar=False):
         """Constructor for the BootstrapWrapper class"""
         self.n_resamples = n_resamples
         self.random_state = random_state
         self.lower, self.upper = (1 - confidence_level) / 2, 1 - (1 - confidence_level) / 2
-        self.progress_bar = progress_bar
+        self.n_jobs = n_jobs
+        self.progress_bar = False if n_jobs != 1 else progress_bar 
         self.return_dist = return_dist
 
     def _compute_ci(self, data):
         """
         Computes the confidence interval from the bootstrap statistics.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         data : array-like
             The bootstrap statistics from which to compute the confidence interval.
 
-        Returns:
-        --------
+        Returns
+        -------
         tuple
             The lower and upper bounds of the confidence interval.
         """
         return np.quantile(data, q=[self.lower, self.upper], axis=0)
     
     @staticmethod
-    def _get_idx(size):
+    def _get_idx(seed, size):
         """
         Generates random indices for resampling.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
+        seed : numpy.random.Generator
+            The random number generator.
         size : int
             The size of the sample from which to generate indices.
 
-        Returns:
-        --------
+        Returns
+        -------
         ndarray
-            An array of random indices.
+            An array of random indices for resampling.
         """
-        return np.random.randint(low=0, high=size, size=size)
+        return seed.integers(low=0, high=size, size=size)
     
     def __call__(self, func):
         """
         The main decorator method that wraps the target function, applying bootstrap resampling to its arguments.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         func : callable
             The target function to which bootstrap resampling is applied.
 
-        Returns:
-        --------
+        Returns
+        -------
         callable
-            A wrapped version of the target function that applies bootstrap resampling.
+            A wrapped version of the target function that applies bootstrap resampling 
+            and computes the confidence interval of the statistic calculated by `func`.
+
+        Raises
+        ------
+        TypeError
+            If any of the arguments passed to the decorated function are not iterable.
         """
         def wrapper(*args, **kwargs):
-            np.random.seed(self.random_state)
-            rng = tqdm(range(self.n_resamples)) if self.progress_bar else range(self.n_resamples)
-            self.stat_lst = []
             size_lst = []
             for arg in args:
                 if not hasattr(arg, '__len__'):
@@ -436,10 +481,17 @@ class BootstrapWrapper:
                     size_lst.append(len(arg)) 
             size = min(size_lst)
             arrs = np.column_stack([i for i in args])
-            for i in rng:
-                idx = self._get_idx(size)
+            def _resample_func(seed, size):
+                idx = self._get_idx(seed, size)
                 sub = arrs[idx]
                 sub_lst = [sub[:,i] for i in range(sub.shape[1])]
-                self.stat_lst.append(func(*sub_lst, **kwargs))
+                return func(*sub_lst, **kwargs)
+            pr = ParallelResampler(n_resamples=self.n_resamples, 
+                                   random_state=self.random_state, 
+                                   n_jobs=self.n_jobs, 
+                                   progress_bar=self.progress_bar)
+            self.stat_lst = pr.resample(_resample_func, size)
+            if self.n_jobs != 1:
+                pr.elapsed_time()
             return (self._compute_ci(self.stat_lst), self.stat_lst) if self.return_dist else self._compute_ci(self.stat_lst)
         return wrapper

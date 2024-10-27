@@ -2,201 +2,159 @@ import numpy as np
 from statsmodels.stats.proportion import proportions_ztest
 from statsmodels.stats.proportion import proportion_effectsize
 from statsmodels.stats.power import tt_ind_solve_power
-from tqdm import tqdm
+from tools import ParallelResampler
 import scipy.stats as st
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-class DurationEstimatorInterface:
-    """
-    A base class for estimating the duration and sample size required for statistical tests to achieve a desired power.
+from collections.abc import Iterable
 
-    Attributes
-    ----------  
-    uplift : float
-        The expected effect size or uplift.
-    daily_size_per_sample : int
-        The number of observations per sample on a daily basis.  
-    alpha : float
-        The significance level used in the hypothesis test.
-    power_threshold : float
-        The desired power of the test.
-    n_resamples : int
-        The number of resampling iterations.
-    random_state : int
-        Seed for the random number generator.
+class DurationEstimator:
     """
-    
-    def __init__(self, uplift, daily_size_per_sample, alpha, power, n_resamples, random_state):
+    Estimates the sample size and duration needed to achieve a desired statistical power 
+    for A/B tests, handling both proportion and continuous metrics.
+
+    Methods
+    -------
+    __init__(self, baseline_value, uplift, daily_nobs1, ...)
+        Initializes the estimator and validates input values.
+    __setattr__(self, key, value)
+        Adjusts the `uplift` attribute to a multiplier.
+    _compute_pvalue(self, seed, sample_size)
+        Computes p-value using resampled data.
+    compute_size(self, max_days=50)
+        Estimates sample size and days needed to reach target power.
+        Returns a dictionary with 'total_size', 'sample_size', 'days', 'power', and 'uplift'.
+    """    
+    def __init__(self, 
+                 baseline_value,
+                 uplift, 
+                 daily_nobs1, 
+                 is_proportion=True,
+                 alpha=0.05, 
+                 power=0.8, 
+                 n_resamples=10000, 
+                 random_state=None, 
+                 n_jobs=-1,
+                 progress_bar=False):
         """
-        Constructor for DurationEstimatorInterface.
-        """
+        Initializes the DurationEstimator and validates input parameters.
+
+        Parameters
+        ----------
+        baseline_value : float or array-like
+            Baseline metric; float for proportions, iterable for continuous metrics.
+        uplift : float
+            Expected relative increase (e.g., 0.1 for 10%).
+        daily_nobs1 : int
+            Daily observations in the control group.
+        is_proportion : bool, default True
+            Whether `baseline_value` is a proportion.
+        alpha : float, default 0.05
+            Significance level.
+        power : float, default 0.8
+            Desired power level.
+        n_resamples : int, default 10000
+            Number of bootstrap resamples.
+        random_state : int or None, default None
+            Random seed for reproducibility.
+        n_jobs : int, default -1
+            Number of parallel jobs.
+        progress_bar : bool, default False
+            Show progress bar during resampling. Effective only when n_jobs=1
+        """        
         self.alpha = alpha
-        self.power_threshold = power
+        self.desired_power = power
         self.n_resamples = n_resamples
         self.random_state = random_state
-        self.daily_size_per_sample = daily_size_per_sample
+        self.daily_nobs1 = daily_nobs1
+        self.progress_bar = progress_bar
         self.uplift = uplift
+        self.n_jobs = n_jobs
+        self.is_proportion = is_proportion
+        
+        if self.is_proportion:
+            if not isinstance(baseline_value, float):
+                raise ValueError('You must pass float value in baseline_arg if is_proportion=True')
+            elif (baseline_value <= 0 or baseline_value >= 1):
+                raise ValueError('Conversion Rate must take value between 0 and 1')
+            else:
+                self.p_control = baseline_value
+                self.p_test = baseline_value * self.uplift
+        if not self.is_proportion:
+            if not isinstance(baseline_value, Iterable):
+                    raise TypeError('You must pass iterable value if is_proportion=False')
+            self.target_sample = baseline_value
+            
         
     def __setattr__(self, key, value):
         """
-        Custom attribute setter for uplift adjusting.
-    
-        Parameters
-        ----------
-        key : str
-            The name of the attribute to set.
-        value : various
-            The value to be assigned to the attribute.
+        Custom attribute setting, adjusting `uplift` to a multiplier.
         """
         if key == 'uplift':
             self.__dict__[key] = value + 1
         else:
             super().__setattr__(key, value)
-            
-    def compute_size(self, progress_bar=True):
+
+    def _compute_pvalue(self, seed, sample_size):
         """
-        Computes the total sample size and number of days required to achieve the specified power.
+        Calculates the p-value from resampled data for a given sample size.
+        
+        Parameters
+        ----------
+        seed : numpy.random.Generator
+            Random number generator for resampling.
+        sample_size : int
+            Number of observations per group.
+
+        Returns
+        -------
+        float
+            The computed p-value.
+        """
+        if self.is_proportion:
+            a_control = seed.binomial(n=sample_size, p=self.p_control)
+            a_test = seed.binomial(n=sample_size, p=self.p_test)
+            return proportions_ztest([a_control, a_test],[sample_size]*2)[1]
+        else:
+            sample_data = seed.choice(self.target_sample, size=sample_size*2, replace=True)
+            a,b = sample_data[:sample_size], sample_data[sample_size:] * self.uplift
+            return st.ttest_ind(a,b).pvalue
+    
+    def compute_size(self, max_days=50):
+        """
+        Estimates required sample size and duration to reach desired power.
 
         Parameters
         ----------
-        progress_bar : bool, default=True
-            Whether to display a progress bar during computation.
+        max_days : int, default 50
+            Maximum days to attempt for reaching power.
 
         Returns
         -------
         dict
-            Dictionary containing total sample size ('total_size'), individual sample size ('sample_size'), 
-            number of days ('days'), and achieved power ('power').
+            Contains 'total_size', 'sample_size', 'days', 'power', 'uplift'.
         """
-        np.random.seed(self.random_state)
+        pr = ParallelResampler(n_resamples=self.n_resamples, random_state=self.random_state, n_jobs=self.n_jobs, progress_bar=self.progress_bar)
         power = 0
         days = 0
         cumulative_sample_size = 0
-        while power < self.power_threshold:
-            cumulative_sample_size += self.daily_size_per_sample
-            pvalues = self._compute_pvalues(sample_size=cumulative_sample_size, progress_bar=progress_bar)
+        while power < self.desired_power:
+            cumulative_sample_size += self.daily_nobs1
+            pvalues = pr.resample(self._compute_pvalue, cumulative_sample_size)
             days += 1
             power = (pvalues < self.alpha).mean()
-        return {'total_size':cumulative_sample_size*2,'sample_size':cumulative_sample_size, 'days':days, 'power': power} 
-    
-    def _compute_pvalues():
-        """
-        Abstract method to be implemented in subclasses. Used for computing simulations.
-        """
-        raise NotImplementedError("Subclasses should implement this!")
-        
-class ProportionSizeEstim(DurationEstimatorInterface):
-    """
-    A class for estimating sample size and duration based on proportion metrics, extending the DurationEstimatorInterface.
+            if days == max_days:
+                print('Desired power cannot be achieved with the given arguments')
+                break
+        if self.n_jobs != 1:
+            pr.elapsed_time()
+        return {'total_size':cumulative_sample_size*2,
+                'sample_size':cumulative_sample_size, 
+                'days':days, 
+                'power': power, 
+                'uplift':round(self.uplift-1,3)} 
 
-    Attributes
-    ----------
-    cr_baseline : float
-        The baseline conversion rate.
-    uplift : float
-        The expected effect size or uplift.
-    daily_size_per_sample : int
-        The number of observations per sample on a daily basis.  
-    alpha : float
-        The significance level used in the hypothesis test.
-    power_threshold : float
-        The desired power of the test.
-    n_resamples : int
-        The number of resampling iterations.
-    random_state : int
-        Seed for the random number generator.
-    """
-    
-    def __init__(self, cr_baseline, uplift, daily_size_per_sample, alpha=0.05, power=0.8, n_resamples=10_000, random_state=None):
-        """
-        Constructor for DurationEstimatorInterface.
-        """
-        super().__init__(uplift=uplift, daily_size_per_sample=daily_size_per_sample, alpha=alpha, 
-                         power=power, n_resamples=n_resamples, random_state=random_state)
-        if (cr_baseline < 0 or cr_baseline > 1):
-            raise ValueError('Conversion Rate must take value between 0 and 1')
-        self.cr_baseline = cr_baseline
-        
-    def _compute_pvalues(self, sample_size, progress_bar):
-        """
-        Computes p-values for the proportion test based on the difference in proportions.
-    
-        Parameters
-        ----------
-        sample_size : int
-            The sample size for each group.
-        progress_bar : bool
-            Whether to display a progress bar during computation.
-    
-        Returns
-        -------
-        np.array
-            Array of p-values from the proportion test.
-        """
-        p_control = self.cr_baseline
-        p_test = p_control * self.uplift
-        pvalues = []
-        rng = tqdm(range(self.n_resamples)) if progress_bar else range(self.n_resamples)
-        for i in rng:
-            a_control = np.random.binomial(n=sample_size, p=p_control)
-            a_test = np.random.binomial(n=sample_size, p=p_test)
-            pvalues.append(proportions_ztest([a_control, a_test],[sample_size]*2)[1])
-        return np.array(pvalues)
-    
-class TtestSizeEstim(DurationEstimatorInterface):
-    """
-    A class for estimating sample size and duration based on mean metrics (T-test), extending the DurationEstimatorInterface.
-    
-    Parameters
-    ----------
-    target_sample : array-like
-        The target sample data for T-test analysis.
-    uplift : float
-        Expected effect size or uplift.
-    daily_size_per_sample : int
-        Number of observations per sample on a daily basis.
-    alpha : float, default=0.05
-        Significance level for the hypothesis test.
-    power : float, default=0.8
-        Desired power of the test.
-    n_resamples : int, default=10000
-        Number of resampling iterations.
-    random_state : int, optional
-        Seed for the random number generator.
-    """
-    
-    def __init__(self, target_sample, uplift, daily_size_per_sample, alpha=0.05, power=0.8, n_resamples=10_000, random_state=None):
-        """
-        Constructor for TtestSizeEstim.
-        """
-        super().__init__(uplift=uplift, daily_size_per_sample=daily_size_per_sample, alpha=alpha, 
-                         power=power, n_resamples=n_resamples, random_state=random_state)
-        self.target_sample = target_sample
-        
-    def _compute_pvalues(self, sample_size, progress_bar):
-        """
-        Computes p-values for the T-test based on the difference in means.
-    
-        Parameters
-        ----------
-        sample_size : int
-            The sample size for each group.
-        progress_bar : bool
-            Whether to display a progress bar during computation.
-    
-        Returns
-        -------
-        np.array
-            Array of p-values from the T-test.
-        """
-        pvalues = []
-        rng = tqdm(range(self.n_resamples)) if progress_bar else range(self.n_resamples)
-        for i in rng:
-            sample_data = np.random.choice(self.target_sample, size=sample_size*2, replace=True)
-            a,b = sample_data[:sample_size], sample_data[sample_size:] * self.uplift
-            pvalues.append(st.ttest_ind(a,b).pvalue)
-        return np.array(pvalues)
     
 def cohens_d(*args, from_samples=True):
     """
@@ -492,41 +450,37 @@ class TestAnalyzer:
     A class for evaluating the applicability of a statistical method to a specific distribution.
 
     This class is designed to assess whether a given statistical test is appropriate for a particular distribution, 
-    especially in scenarios where the test assumptions (such as normality for instance) may not hold. 
-
-    Attributes
-    ----------
-    n_resamples : int
-        The number of resampling iterations to perform.
-    random_state : int, optional
-        Seed for the random number generator.
-    alpha : float
-        Significance level for hypothesis testing.
-    func : callable
-        The statistical test function to apply on each resample.
-
-    Methods
-    -------
-    resample(sample, progress_bar=True)
-        Performs resampling on the provided sample and applies the test function to assess its suitability.
-    compute_fpr(weighted=False)
-        Computes the false positive rate (FPR) from the stored p-values, indicating test suitability.
-    perform_chisquare(bins=None)
-        Performs a chi-square test to evaluate the uniformity of the p-values distribution.
-    get_charts(figsize=(8,6))
-        Generates and displays chart for the test statistics and p-values, providing visual assessment of test suitability.
+    especially in scenarios where the test assumptions (such as normality) may not hold. 
     """
-    
-    def __init__(self, func, alpha=0.05, n_resamples=10_000, random_state=None):
+
+    def __init__(self, func, alpha=0.05, n_resamples=10000, n_jobs=-1, random_state=None, progress_bar=False):
         """
-        Constructor for DurationEstimatorInterface.
+        Initializes the TestAnalyzer with the given parameters.
+
+        Parameters
+        ----------
+        func : callable
+            The statistical test function to be applied to each resample.
+        alpha : float, default=0.05
+            The significance level for hypothesis testing.
+        n_resamples : int, default=10000
+            The number of resampling iterations to perform.
+        n_jobs : int, default=-1
+            The number of parallel jobs to use for resampling. -1 means using all available processors.
+        random_state : int or None, default=None
+            Seed for the random number generator to ensure reproducibility.
+        progress_bar : bool, default=False
+            Whether to display a progress bar during resampling.
+            Note: The progress bar is only displayed if `n_jobs` is set to 1.
         """
         self.func = func
+        self.alpha = alpha
         self.n_resamples = n_resamples
         self.random_state = random_state
-        self.alpha = alpha
+        self.n_jobs = n_jobs
+        self.progress_bar = progress_bar
         
-    def resample(self, sample, progress_bar=True):
+    def resample(self, sample):
         """
         Performs resampling on the provided sample for suitability analysis of the test function.
 
@@ -534,8 +488,6 @@ class TestAnalyzer:
         ----------
         sample : array-like
             The data sample representing the distribution for the analysis.
-        progress_bar : bool, default=True
-            Whether to display a progress bar during resampling.
 
         Notes
         -----
@@ -543,20 +495,26 @@ class TestAnalyzer:
         It is used to assess whether the distribution of p-values is uniform, indicating the test's suitability 
         for the given distribution.
         """
+        pr = ParallelResampler(
+            n_resamples=self.n_resamples,
+            random_state=self.random_state,
+            n_jobs=self.n_jobs,
+            progress_bar=self.progress_bar
+        )
         
-        np.random.seed(self.random_state)
         sample = np.asarray(sample)
-        pvalues = []
         size = sample.shape[0]
         size_per_sample = int(size / 2)
-        rng = tqdm(range(self.n_resamples)) if progress_bar else range(self.n_resamples)
-        for i in rng:
-                resampled_data = np.random.choice(sample, size=size, replace=True)
-                a,b = resampled_data[:size_per_sample], resampled_data[size_per_sample:] 
-                stat_result = self.func(a,b)
-                pvalues.append(stat_result)
-        self.pvalues = np.array(pvalues)
         
+        def _resample_func(seed):
+            resampled_data = seed.choice(sample, size=size, replace=True)
+            a, b = resampled_data[:size_per_sample], resampled_data[size_per_sample:]
+            return self.func(a, b)
+
+        self.pvalues = pr.resample(_resample_func)
+        if self.n_jobs != 1:
+            pr.elapsed_time()
+
     def compute_fpr(self, weighted=False):
         """
         Computes the false positive rate (FPR) based on the stored p-values.
@@ -581,7 +539,8 @@ class TestAnalyzer:
         Parameters
         ----------
         bins : int, optional
-            The number of bins to use in the chi-square test.
+            The number of bins to use in the chi-square test. If not provided, 
+            the number of bins is automatically determined based on the range of p-values.
 
         Returns
         -------
@@ -598,22 +557,26 @@ class TestAnalyzer:
             bins = 20 if len_ > 20 else len_
         return st.chisquare(np.histogram(self.pvalues, bins=bins)[0])
     
-    def get_charts(self, figsize=(8,6)):
+    def get_charts(self, figsize=(8, 6)):
         """
-        Generates and displays chart for the distribution of test p-values.
+        Generates and displays a chart for the distribution of test p-values.
 
         Parameters
         ----------
         figsize : tuple, default=(8, 6)
             Size of the figure to display.
-        bins : int, default=20
-            The number of bins for the histogram.
+
+        Notes
+        -----
+        The chart includes a plot of sorted p-values against a uniform distribution line, 
+        and a vertical line at the alpha threshold to help visualize the distribution of p-values 
+        and the rate of significant results.
         """
         with sns.axes_style("whitegrid"): 
             plt.figure(figsize=figsize)
             plt.plot([0, 1], [0, 1], linestyle='dashed', color='black', linewidth=2)
-            plt.vlines(x=0.05,ymin=0,ymax=1,linestyle='dotted', color='black', linewidth=2) 
-            plt.plot(np.array(sorted(self.pvalues)), np.array(sorted(np.linspace(0,1,self.n_resamples))))
+            plt.vlines(x=0.05, ymin=0, ymax=1, linestyle='dotted', color='black', linewidth=2) 
+            plt.plot(np.array(sorted(self.pvalues)), np.array(sorted(np.linspace(0, 1, self.n_resamples))))
             plt.title('P-values Distribution Estimate')
             plt.ylabel('p-value')
             plt.show()

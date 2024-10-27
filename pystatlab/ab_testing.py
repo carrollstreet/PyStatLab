@@ -2,7 +2,7 @@ import numpy as np
 import scipy.stats as st
 import matplotlib.pyplot as plt
 import seaborn as sns
-from tqdm import tqdm
+from tools import ParallelResampler
 
 class ParentTestInterface:
     """
@@ -13,20 +13,14 @@ class ParentTestInterface:
     ----------
     confidence_level : float
         The confidence level for calculating confidence intervals.
-    n_resamples : int
-        The number of simulations or units to be considered in the test.
-    random_state : int
-        The seed for the random number generator to ensure reproducibility.
     """
     
     init_items = {}
 
-    def __init__(self, confidence_level, n_resamples, random_state):
+    def __init__(self, confidence_level):
         """
         Constructor for the ParentTestInterface class.
         """
-        self.n_resamples = n_resamples
-        self.random_state = random_state
         self.confidence_level = confidence_level
         self._compute_confidence_bounds()
         self.init_items = self.__dict__.copy()
@@ -44,12 +38,16 @@ class ParentTestInterface:
             The value to be set for the attribute.
         """
         if key == 'confidence_level':
-            super().__setattr__(key,value)
+            super().__setattr__(key, value)
             self._compute_confidence_bounds()
+        elif key == 'progress_bar' and self.__dict__.get('n_jobs') != 1:
+            super().__setattr__(key, False) 
         else:
-            super().__setattr__(key,value)
-            
-        if key in self.init_items and self.init_items[key] != value:
+            super().__setattr__(key, value)
+
+        if key == 'progress_bar' and self.init_items.get('n_jobs') != 1:
+            self.init_items[key] = False
+        elif key in self.init_items and self.init_items[key] != value:
             self.init_items[key] = value
         
     def _compute_confidence_bounds(self):
@@ -213,7 +211,6 @@ class ParentTestInterface:
         """
         raise NotImplementedError("Subclasses should implement this!")
 
-
 class BayesBeta(ParentTestInterface):
     """
     Implements Bayesian approach to A/B testing using beta distributions.
@@ -230,11 +227,13 @@ class BayesBeta(ParentTestInterface):
         The seed for the random number generator to ensure reproducibility.
     """
 
-    def __init__(self, confidence_level=0.95, n_resamples=100_000, random_state=None):
+    def __init__(self, confidence_level=0.95, n_resamples=100000, random_state=None):
         """
         Constructor for the BayesBeta class.
         """
-        super().__init__(confidence_level=confidence_level, n_resamples=n_resamples, random_state=random_state)
+        self.n_resamples=n_resamples
+        self.random_state=random_state
+        super().__init__(confidence_level=confidence_level)
             
     def resample(self, nobs, counts, prior=()):
         """
@@ -346,34 +345,40 @@ class BayesBeta(ParentTestInterface):
                                             )
             plt.show()
 
-
 class Bootstrap(ParentTestInterface):
     """
     Bootstrap class for conducting statistical tests using bootstrapping.
 
     This class extends ParentTestInterface, providing a resampling method
     to estimate the distribution of a statistic by randomly sampling with replacement.
-
-    Parameters
-    ----------
-    func : function, default=np.mean
-        The statistical function to apply to the samples.
-        Note: This parameter is not used when four samples are provided.
-    confidence_level : float, default=0.95
-        The confidence level for calculating confidence intervals.
-    n_resamples : int, default=10000
-        The number of resampling iterations to perform.
-    random_state : int, optional
-        The seed for the random number generator to ensure reproducibility.
     """
-    def __init__(self, func=np.mean, confidence_level=0.95, n_resamples=10_000, random_state=None):
+    def __init__(self, func=np.mean, confidence_level=0.95, n_resamples=10_000, random_state=None, n_jobs=-1, progress_bar=False):
         """
-        Constructor for the Bootstrap class.
+        Initializes the Bootstrap class with the specified parameters.
+    
+        Parameters
+        ----------
+        func : function, default=np.mean
+            The statistical function to apply to the samples.
+        confidence_level : float, default=0.95
+            The confidence level for calculating confidence intervals.
+        n_resamples : int, default=10000
+            The number of resampling iterations to perform.
+        random_state : int, optional
+            The seed for the random number generator to ensure reproducibility.
+        n_jobs : int, default=-1
+            The number of jobs to run in parallel during resampling. Use -1 to utilize all available cores.
+        progress_bar : bool, default=False
+            Whether to display a progress bar during resampling. Only effective if `n_jobs` is set to 1.
         """
         self.func = func
-        super().__init__(confidence_level=confidence_level, n_resamples=n_resamples, random_state=random_state)
+        self.n_resamples = n_resamples
+        self.random_state = random_state
+        self.n_jobs = n_jobs
+        self.progress_bar = False if n_jobs != 1 else progress_bar
+        super().__init__(confidence_level=confidence_level)
 
-    def resample(self, *samples, match_max_length=False, ind=True, progress_bar=False):
+    def resample(self, *samples, match_max_length=False, ind=True):
         """
         Performs the resampling process on the given samples.
 
@@ -389,14 +394,12 @@ class Bootstrap(ParentTestInterface):
             Note: When `ind` is False, `match_max_length` has no effect.
         ind : bool, default=True
             Whether the samples are independent.
-        progress_bar : bool, default=False
-            Whether to display a progress bar during resampling.
-
+    
         Returns
         -------
         dict
             A dictionary containing the test parameters after resampling.
-        
+    
         Raises
         ------
         ValueError
@@ -404,22 +407,19 @@ class Bootstrap(ParentTestInterface):
             or not equal to 4 for ratio metrics.
             If the lengths of numerators and denominators do not match for ratio metrics.
         """
-        np.random.seed(self.random_state)
-        rng = tqdm(range(self.n_resamples)) if progress_bar else range(self.n_resamples)
 
-        def _generate_indices(size_a, size_b, ind, match_max_length):
+        def _generate_indices(seed, size_a, size_b, ind, match_max_length):
             if match_max_length:
                 sample_size_a = sample_size_b = max(size_a, size_b)
             else:
                 sample_size_a, sample_size_b = size_a, size_b
-            
-            a = np.random.randint(low=0, high=size_a, size=sample_size_a)
+            a = seed.integers(low=0, high=size_a, size=sample_size_a)
             if not ind:
                 return a, a
             else:
-                b = np.random.randint(low=0, high=size_b, size=sample_size_b)
+                b = seed.integers(low=0, high=size_b, size=sample_size_b)
                 return a, b
-
+            
         def _rel_size_comrarison(size_a, size_b):
             if not ind and size_a != size_b:
                 raise ValueError('Relative samples must be same sample size')
@@ -452,11 +452,13 @@ class Bootstrap(ParentTestInterface):
                 "You must pass only two samples for non-ratio metrics, or four samples for ratio metrics: "
                 "numerator and denominator for control, then for treatment groups"
             )
+            
+        def _resample_func(seed):
+            ids_a, ids_b = _generate_indices(seed, size_a=size_a, size_b=size_b, ind=ind, match_max_length=match_max_length)
+            return [self.func(sample_a[ids_a]),self.func(sample_b[ids_b])]
 
-        self._resample_data = np.zeros((self.n_resamples, 2))
-        for i in rng:
-            ids_a, ids_b = _generate_indices(size_a=size_a, size_b=size_b, ind=ind,match_max_length=match_max_length)
-            self._resample_data[i] = [self.func(sample_a[ids_a]),self.func(sample_b[ids_b])]
+        pr = ParallelResampler(n_resamples=self.n_resamples, random_state=self.random_state, n_jobs=self.n_jobs, progress_bar=self.progress_bar)
+        self._resample_data = pr.resample(_resample_func)
             
         self.diffs = self._resample_data[:, 1] - self._resample_data[:, 0]
         self.a_ci = self._compute_ci(self._resample_data[:, 0])
@@ -464,23 +466,26 @@ class Bootstrap(ParentTestInterface):
         self.diff_ci = self._compute_ci(self.diffs)
         self.uplift_dist = self._compute_uplift(self._resample_data[:, 0], self._resample_data[:, 1])
         self.uplift_ci = self._compute_ci(self.uplift_dist)
+        if self.n_jobs != 1:
+            pr.elapsed_time()
         return self.get_test_parameters()
 
     def compute(self, two_sided=True, readable=False):
         """
         Computes the statistical significance and other metrics.
-
+    
         Parameters
         ----------
         two_sided : bool, default=True
             Whether to perform a two-sided test.
         readable : bool, default=False
             Whether to print results in a human-readable format.
-
+    
         Returns
         -------
         dict
-            A dictionary of computed metrics.
+            A dictionary of computed metrics, including p-value, uplift, confidence intervals for control and test groups,
+            and the difference confidence interval.
         """
         p = (np.sum(self._resample_data[:, 1] > self._resample_data[:, 0]) + 1) / (self.n_resamples + 1)
         pvalue = self._get_alternative_value(p=p, two_sided=two_sided)
@@ -499,11 +504,17 @@ class Bootstrap(ParentTestInterface):
     def get_charts(self, figsize=(22, 6)):
         """
         Generates and displays charts visualizing the resampling results.
-
+    
         Parameters
         ----------
         figsize : tuple of int, default=(22, 6)
             The size of the figure to be displayed.
+    
+        Displays
+        -------
+        Plots
+            Three plots visualizing the distribution of the resampled metrics for control and test groups,
+            the distribution of differences between test and control, and the uplift distribution.
         """
         with sns.axes_style('whitegrid'):
             plt.figure(figsize=figsize)
@@ -548,7 +559,9 @@ class QuantileBootstrap(ParentTestInterface):
         Constructor for the QuantileBootstrap class.
         """
         self.q = q
-        super().__init__(confidence_level=confidence_level, n_resamples=n_resamples, random_state=random_state)
+        self.n_resamples=n_resamples
+        self.random_state=random_state
+        super().__init__(confidence_level=confidence_level)
     
     def resample(self, *samples):
         """
@@ -655,7 +668,9 @@ class ResamplingTtest(ParentTestInterface):
         """
         Constructor for the ParametricResamplingTest class.
         """
-        super().__init__(confidence_level=confidence_level, n_resamples=n_resamples, random_state=random_state)
+        self.n_resamples=n_resamples
+        self.random_state=random_state
+        super().__init__(confidence_level=confidence_level)
         
     def resample(self, mean, std, n):
         """
@@ -731,7 +746,8 @@ class ResamplingTtest(ParentTestInterface):
             'uplift_ci': self.uplift_ci,
             'control_ci':self.a_ci,
             'test_ci':self.b_ci,
-            'diff_ci': self.diff_ci
+            'diff_ci': self.diff_ci,
+            'df':self.df
         }
         
         return self._get_readable_format(result_dict=result) if readable else result
@@ -768,41 +784,47 @@ def permutation_ind(*samples,
                     confidence_level=0.95,
                     n_resamples=10000,
                     two_sided=True, 
+                    n_jobs=-1,
                     random_state=None, 
                     progress_bar=False, 
                     ):
     """
     Performs an independent two-sample permutation test.
 
-    This test is used to determine if there is a significant difference between 
-    the means of two independent samples. It is robust against non-normal 
-    distributions and is not influenced by outliers.
+    This test evaluates whether there is a significant difference between 
+    the distributions of two independent samples by comparing their test statistics.
+    It is suitable for non-normal distributions and is robust to the presence of outliers.
 
     Parameters
     ----------
+    samples : tuple of array-like
+        The samples to compare. For non-ratio metrics, provide two samples.
+        For ratio metrics, provide four samples: numerator and denominator for 
+        control, then for treatment groups.
     func : function, default=np.mean
         Function used to compute the test statistic (e.g., np.mean, np.median).
-        Note: This parameter has no effect when four samples (ratio metrics) are provided.
-    samples : tuple of array-like
-        The samples to compare. For non-ratio metrics, two samples should be 
-        provided. For ratio metrics, four samples should be provided: numerator 
-        and denominator for control, then for treatment groups.
+        This parameter is ignored when four samples (ratio metrics) are provided.
     confidence_level : float, default=0.95
-        Confidence level for computing the confidence interval of the difference.
+        The confidence level for the confidence interval of the difference.
     n_resamples : int, default=10000
-        Number of permutations to perform.
+        The number of permutations to perform during the test.
     two_sided : bool, default=True
-        Perform a two-sided test. If False, perform a one-sided test.
+        If True, performs a two-sided test; otherwise, performs a one-sided test.
+    n_jobs : int, default=-1
+        The number of jobs to run in parallel. Use -1 to utilize all available cores.
     random_state : int, optional
-        Seed for the random number generator.
+        Seed for the random number generator to ensure reproducibility.
     progress_bar : bool, default=False
-        Display a progress bar during computation.
+        Whether to display a progress bar during resampling. Effective only if `n_jobs` is 1.
 
     Returns
     -------
     dict
-        A dictionary containing the p-value, observed difference, uplift,
-        and confidence interval of the permutation differences.
+        A dictionary containing the following keys:
+        - 'pvalue': The p-value of the test.
+        - 'uplift': The relative difference between the means of the samples.
+        - 'diff': The observed difference between the test statistic of the samples.
+        - 'permutation_diff_ci': Confidence interval of the permutation differences.
 
     Raises
     ------
@@ -811,9 +833,11 @@ def permutation_ind(*samples,
         or not equal to 4 for ratio metrics.
         If the lengths of numerators and denominators do not match for ratio metrics.
     """
-    np.random.seed(random_state)
+    pr = ParallelResampler(n_resamples=n_resamples, 
+                           random_state=random_state, 
+                           n_jobs=n_jobs, 
+                           progress_bar=progress_bar)
     left_quant, right_quant =  (1 - confidence_level) / 2, 1 - (1 - confidence_level) / 2
-    rng = tqdm(range(n_resamples)) if progress_bar else range(n_resamples)
     
     if len(samples) == 2:
         sample_a, sample_b = np.asarray(samples[0]), np.asarray(samples[1]) 
@@ -845,19 +869,22 @@ def permutation_ind(*samples,
     size_a = sample_a.shape[0]
     size_combined = combined.shape[0]
     
-    diff_arr = np.zeros(n_resamples)
     indices = np.arange(size_combined)
     
-    for i in rng:
-        np.random.shuffle(indices)
-        perm_sample_a = combined[indices[:size_a]]
-        perm_sample_b = combined[indices[size_a:]]
-        diff_arr[i] = func(perm_sample_b) - func(perm_sample_a)
+    def _resample_func(seed):
+        ids = seed.permutation(indices)
+        perm_sample_a = combined[ids[:size_a]]
+        perm_sample_b = combined[ids[size_a:]]
+        return func(perm_sample_b) - func(perm_sample_a)
+
+    
+    diff_arr = pr.resample(_resample_func)
 
     p = (np.sum(observed_diff > diff_arr) + 1) / (n_resamples + 1)
     pvalue = min(2 * p, 2 - 2 * p) if two_sided else p
     permutation_diff_ci = np.quantile(diff_arr, q=[left_quant, right_quant])
-    
+    if n_jobs != 1:
+        pr.elapsed_time()
     return {'pvalue': pvalue, 'uplift': uplift, 'diff': observed_diff, 'permutation_diff_ci': permutation_diff_ci}
 
 
