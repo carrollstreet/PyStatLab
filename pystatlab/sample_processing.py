@@ -1,5 +1,6 @@
 import pandas as pd
 from sklearn.model_selection import train_test_split
+import hashlib
 
 class RankedSplit:
     """
@@ -124,3 +125,46 @@ class RankedSplit:
                                         random_state=self.random_state)
 
         return first, second
+
+
+def bucketize_data(dataframe: pd.DataFrame, hash_col: str, grouping_cols: list = [], agg: dict = {}, num_buckets: int = 10000):
+    """
+    Bucketize and aggregate data based on a hashed column.
+
+    This function assigns data points to buckets based on a hash of a specified column.
+    It allows grouping by additional columns and applying aggregation functions on each bucket.
+
+    Parameters:
+    dataframe : pd.DataFrame
+        The input pandas DataFrame containing the data to be bucketized.
+    hash_col : str
+        The name of the column whose values will be hashed to determine the bucket assignment.
+    grouping_cols : list, default=[]
+        A list of column names to group by before applying the hash-based bucketing.
+        If empty, the hashing will be applied without additional grouping.
+    agg : dict, default={}
+        A dictionary specifying the aggregation functions to apply to each column after bucketing.
+        The keys are column names, and the values are functions or function names (e.g., {'value': 'sum'}).
+    num_buckets : int, default=10000
+        The number of buckets to create. The hash values are divided by this number 
+        to ensure uniform bucket distribution.
+
+    Returns:
+    pd.DataFrame
+        A pandas DataFrame with the grouped and aggregated data, including a 'bucket' column 
+        that indicates the bucket assignment for each group.
+
+    Notes:
+    - The `hash_string` function converts a string into a hash using SHA-256 and then reduces it to a number.
+    - The `vectorized_hash` function applies the hash to a series and maps the results into a specified number of buckets.
+    - Grouping and aggregation allow for summarizing data within each bucket, which is useful for data partitioning or sampling.
+    """
+    def hash_string(s):
+        return int(hashlib.sha256(s.encode()).hexdigest(), 16)
+
+    def vectorized_hash(series, num_buckets):
+        return [hash_string(s) % num_buckets for s in series]
+
+    df = dataframe.copy()
+    df['bucket'] = df.groupby(grouping_cols)[hash_col].transform(vectorized_hash, num_buckets)
+    return df.groupby(grouping_cols + ['bucket']).agg(agg).reset_index()
