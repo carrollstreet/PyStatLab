@@ -1,6 +1,6 @@
 import numpy as np
 import scipy.stats as st
-from tools import ParallelResampler
+from utility import ParallelResampler
 
 def correlation_ratio(values, categories):
     """
