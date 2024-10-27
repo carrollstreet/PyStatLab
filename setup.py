@@ -18,7 +18,8 @@ setup(
         'plotly',
         'matplotlib',
         'seaborn',
-        'tqdm'
+        'tqdm',
+        'joblib'
     ],
     classifiers=[
         'Programming Language :: Python :: 3',
