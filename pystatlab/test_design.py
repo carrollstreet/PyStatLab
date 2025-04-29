@@ -378,6 +378,59 @@ def fixed_power(args=(), nobs1=None, alpha=0.05, ratio=1, proportion=False):
         effect_size = cohens_d(*args[0], *args[1], from_samples=False)
     return tt_ind_solve_power(effect_size=effect_size, alpha=alpha, nobs1=nobs1, ratio=ratio)
 
+def fixed_horizon(args=(), alpha=0.05, power=0.8, ratio=1, proportion=False):
+    """
+    Computes expected sample size of a two-sample t-test or a test of proportions for running experiment.
+
+    Parameters:
+    -----------
+    args : tuple
+        A tuple of two arrays or two single values.
+        - If `proportion` is set to `True`, `args` should be two proportion values representing
+          the proportions of two groups.
+        - If `proportion` is set to `False`, `args` should be a tuple of two arrays:
+          - The first array should contain the means of the two groups.
+          - The second array should contain the standard deviations of the two groups.
+
+    alpha : float, optional, default=0.05
+        The significance level of the test. It represents the probability of a Type I error,
+        i.e., rejecting the null hypothesis when it is true. Common values are 0.05, 0.01, etc.
+
+    power : float, optional, default=0.8
+        The power of the statistical test, defined as the probability of correctly rejecting the null 
+        hypothesis when the alternative hypothesis is true. It is equal to 1 minus the probability of a Type II error (β). 
+        A common value is 0.8, indicating an 80% chance of detecting a true effect.
+
+    ratio : float, optional, default=1
+        The ratio of the sample sizes of the second group relative to the first group.
+        For example, if `ratio = 2`, the second group will have twice as many observations as the first group.
+
+    proportion : bool, optional, default=False
+        Indicates whether the input values in `args` represent proportions.
+        - If set to `True`, the function computes the power for a two-proportion z-test.
+        - If set to `False`, the function computes the power for a two-sample t-test
+          based on the means and standard deviations provided in `args`.
+
+    Returns:
+    --------
+    sample size : float
+        The computed sample size for experiment.
+
+    Raises:
+    ValueError
+        - If `args` does not contain exactly two elements.
+        - If `proportion` is `True` and the provided `args` are not valid proportion values.
+        - If `proportion` is `False` and the provided `args` are not valid mean and standard deviation arrays.
+
+    """
+    if len(args) != 2:
+        raise ValueError('You must pass two args: two proportion values if proportion is True or mean array and std array with two values in each')
+    if proportion:
+        effect_size = proportion_effectsize(args[0], args[1])
+    else:
+        effect_size = cohens_d(*args[0], *args[1], from_samples=False)
+    return tt_ind_solve_power(effect_size=effect_size, alpha=alpha, power=power, ratio=ratio)
+
 def normal_1samp_size(sigma, d, confidence_level=0.95):
     """
     Calculates the required sample size to estimate the mean of a normally distributed population within a desired 
