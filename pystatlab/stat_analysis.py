@@ -358,140 +358,140 @@ def bootstrap_ci(*samples,
     return (result, bootstrap_stats) if return_dist else result
 
 
-class BootstrapWrapper:
-    """
-    A decorator class for applying bootstrap resampling to estimate confidence intervals 
-    for statistics calculated from sample data.
+# class BootstrapWrapper:
+#     """
+#     A decorator class for applying bootstrap resampling to estimate confidence intervals 
+#     for statistics calculated from sample data.
 
-    Attributes
-    ----------
-    confidence_level : float, optional
-        The confidence level for the confidence interval estimation. Default is 0.95.
-    n_resamples : int, optional
-        The number of bootstrap resamples to generate. Default is 10,000.
-    n_jobs : int, optional
-        The number of parallel jobs to use for resampling. Default is -1 (uses all available cores).
-    random_state : int, optional
-        Seed for the random number generator to ensure reproducibility. Default is None.
-    return_dist : bool, optional
-        If True, returns both the confidence interval and the resampled statistics distribution. Default is False.
-    progress_bar : bool, optional
-        If True, displays a progress bar during the bootstrap resampling process. Effective only if `n_jobs` is 1.
+#     Attributes
+#     ----------
+#     confidence_level : float, optional
+#         The confidence level for the confidence interval estimation. Default is 0.95.
+#     n_resamples : int, optional
+#         The number of bootstrap resamples to generate. Default is 10,000.
+#     n_jobs : int, optional
+#         The number of parallel jobs to use for resampling. Default is -1 (uses all available cores).
+#     random_state : int, optional
+#         Seed for the random number generator to ensure reproducibility. Default is None.
+#     return_dist : bool, optional
+#         If True, returns both the confidence interval and the resampled statistics distribution. Default is False.
+#     progress_bar : bool, optional
+#         If True, displays a progress bar during the bootstrap resampling process. Effective only if `n_jobs` is 1.
 
-    Methods
-    -------
-    __init__(self, confidence_level=0.95, n_resamples=10_000, n_jobs=-1, random_state=None, return_dist=False, progress_bar=False)
-        Initializes the BootstrapWrapper with specified attributes.
+#     Methods
+#     -------
+#     __init__(self, confidence_level=0.95, n_resamples=10_000, n_jobs=-1, random_state=None, return_dist=False, progress_bar=False)
+#         Initializes the BootstrapWrapper with specified attributes.
 
-    _compute_ci(self, data)
-        Computes the confidence interval from the bootstrap resampled statistics.
+#     _compute_ci(self, data)
+#         Computes the confidence interval from the bootstrap resampled statistics.
 
-    _get_idx(seed, size)
-        Generates random indices for resampling, given the sample size and random seed.
+#     _get_idx(seed, size)
+#         Generates random indices for resampling, given the sample size and random seed.
 
-    __call__(self, func)
-        The main method that applies bootstrap resampling to the function `func` passed to the decorator.
-        It wraps `func`, performing bootstrap resampling on its input data, and then applies `func`
-        to each resampled dataset to compute the desired statistic.
+#     __call__(self, func)
+#         The main method that applies bootstrap resampling to the function `func` passed to the decorator.
+#         It wraps `func`, performing bootstrap resampling on its input data, and then applies `func`
+#         to each resampled dataset to compute the desired statistic.
 
-    Usage Example
-    -------------
-    @BootstrapWrapper(random_state=42)
-    def linear_reg_coef(x, y):
-        return np.polyfit(x, y, deg=1)[1]
+#     Usage Example
+#     -------------
+#     @BootstrapWrapper(random_state=42)
+#     def linear_reg_coef(x, y):
+#         return np.polyfit(x, y, deg=1)[1]
 
-    # Now `linear_reg_coef` will return the 95% confidence interval of the slope coefficient
-    # based on bootstrap resampling.
+#     # Now `linear_reg_coef` will return the 95% confidence interval of the slope coefficient
+#     # based on bootstrap resampling.
 
-    Raises
-    ------
-    TypeError
-        If any of the arguments passed to the decorated function are not iterable.
-    """
-    def __init__(self, confidence_level=0.95, n_resamples=10_000, n_jobs=-1, random_state=None, return_dist=False, progress_bar=False):
-        """Constructor for the BootstrapWrapper class"""
-        self.n_resamples = n_resamples
-        self.random_state = random_state
-        self.lower, self.upper = (1 - confidence_level) / 2, 1 - (1 - confidence_level) / 2
-        self.n_jobs = n_jobs
-        self.progress_bar = False if n_jobs != 1 else progress_bar 
-        self.return_dist = return_dist
+#     Raises
+#     ------
+#     TypeError
+#         If any of the arguments passed to the decorated function are not iterable.
+#     """
+#     def __init__(self, confidence_level=0.95, n_resamples=10_000, n_jobs=-1, random_state=None, return_dist=False, progress_bar=False):
+#         """Constructor for the BootstrapWrapper class"""
+#         self.n_resamples = n_resamples
+#         self.random_state = random_state
+#         self.lower, self.upper = (1 - confidence_level) / 2, 1 - (1 - confidence_level) / 2
+#         self.n_jobs = n_jobs
+#         self.progress_bar = False if n_jobs != 1 else progress_bar 
+#         self.return_dist = return_dist
 
-    def _compute_ci(self, data):
-        """
-        Computes the confidence interval from the bootstrap statistics.
+#     def _compute_ci(self, data):
+#         """
+#         Computes the confidence interval from the bootstrap statistics.
 
-        Parameters
-        ----------
-        data : array-like
-            The bootstrap statistics from which to compute the confidence interval.
+#         Parameters
+#         ----------
+#         data : array-like
+#             The bootstrap statistics from which to compute the confidence interval.
 
-        Returns
-        -------
-        tuple
-            The lower and upper bounds of the confidence interval.
-        """
-        return np.quantile(data, q=[self.lower, self.upper], axis=0)
+#         Returns
+#         -------
+#         tuple
+#             The lower and upper bounds of the confidence interval.
+#         """
+#         return np.quantile(data, q=[self.lower, self.upper], axis=0)
     
-    @staticmethod
-    def _get_idx(seed, size):
-        """
-        Generates random indices for resampling.
+#     @staticmethod
+#     def _get_idx(seed, size):
+#         """
+#         Generates random indices for resampling.
 
-        Parameters
-        ----------
-        seed : numpy.random.Generator
-            The random number generator.
-        size : int
-            The size of the sample from which to generate indices.
+#         Parameters
+#         ----------
+#         seed : numpy.random.Generator
+#             The random number generator.
+#         size : int
+#             The size of the sample from which to generate indices.
 
-        Returns
-        -------
-        ndarray
-            An array of random indices for resampling.
-        """
-        return seed.integers(low=0, high=size, size=size)
+#         Returns
+#         -------
+#         ndarray
+#             An array of random indices for resampling.
+#         """
+#         return seed.integers(low=0, high=size, size=size)
     
-    def __call__(self, func):
-        """
-        The main decorator method that wraps the target function, applying bootstrap resampling to its arguments.
+#     def __call__(self, func):
+#         """
+#         The main decorator method that wraps the target function, applying bootstrap resampling to its arguments.
 
-        Parameters
-        ----------
-        func : callable
-            The target function to which bootstrap resampling is applied.
+#         Parameters
+#         ----------
+#         func : callable
+#             The target function to which bootstrap resampling is applied.
 
-        Returns
-        -------
-        callable
-            A wrapped version of the target function that applies bootstrap resampling 
-            and computes the confidence interval of the statistic calculated by `func`.
+#         Returns
+#         -------
+#         callable
+#             A wrapped version of the target function that applies bootstrap resampling 
+#             and computes the confidence interval of the statistic calculated by `func`.
 
-        Raises
-        ------
-        TypeError
-            If any of the arguments passed to the decorated function are not iterable.
-        """
-        def wrapper(*args, **kwargs):
-            size_lst = []
-            for arg in args:
-                if not hasattr(arg, '__len__'):
-                    raise TypeError('All args must be iterable')
-                else:
-                    size_lst.append(len(arg)) 
-            size = min(size_lst)
-            arrs = np.column_stack([i for i in args])
-            def _resample_func(seed, size):
-                idx = self._get_idx(seed, size)
-                sub = arrs[idx]
-                sub_lst = [sub[:,i] for i in range(sub.shape[1])]
-                return func(*sub_lst, **kwargs)
-            pr = ParallelResampler(n_resamples=self.n_resamples, 
-                                   random_state=self.random_state, 
-                                   n_jobs=self.n_jobs, 
-                                   progress_bar=self.progress_bar)
-            self.stat_lst = pr.resample(_resample_func, size)
-            if self.n_jobs != 1:
-                pr.elapsed_time()
+#         Raises
+#         ------
+#         TypeError
+#             If any of the arguments passed to the decorated function are not iterable.
+#         """
+#         def wrapper(*args, **kwargs):
+#             size_lst = []
+#             for arg in args:
+#                 if not hasattr(arg, '__len__'):
+#                     raise TypeError('All args must be iterable')
+#                 else:
+#                     size_lst.append(len(arg)) 
+#             size = min(size_lst)
+#             arrs = np.column_stack([i for i in args])
+#             def _resample_func(seed, size):
+#                 idx = self._get_idx(seed, size)
+#                 sub = arrs[idx]
+#                 sub_lst = [sub[:,i] for i in range(sub.shape[1])]
+#                 return func(*sub_lst, **kwargs)
+#             pr = ParallelResampler(n_resamples=self.n_resamples, 
+#                                    random_state=self.random_state, 
+#                                    n_jobs=self.n_jobs, 
+#                                    progress_bar=self.progress_bar)
+#             self.stat_lst = pr.resample(_resample_func, size)
+#             if self.n_jobs != 1:
+#                 pr.elapsed_time()
             return (self._compute_ci(self.stat_lst), self.stat_lst) if self.return_dist else self._compute_ci(self.stat_lst)
         return wrapper
