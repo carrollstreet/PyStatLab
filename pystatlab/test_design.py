@@ -585,30 +585,8 @@ class TestAnalyzer:
         fpr = np.mean(self.pvalues < self.alpha)
         return fpr * max(self.pvalues) if weighted else fpr
 
-    def perform_chisquare(self, bins=None):
-        """
-        Performs a chi-square test on the distribution of p-values.
-
-        Parameters
-        ----------
-        bins : int, optional
-            The number of bins to use in the chi-square test. If not provided, 
-            the number of bins is automatically determined based on the range of p-values.
-
-        Returns
-        -------
-        tuple
-            The chi-square test statistic and the p-value.
-
-        Notes
-        -----
-        This method evaluates the uniformity of the p-values distribution as an indicator of the test's suitability 
-        for the given distribution.
-        """
-        if not bins:
-            len_ = len(np.arange(0, max(self.pvalues), self.alpha))
-            bins = 20 if len_ > 20 else len_
-        return st.chisquare(np.histogram(self.pvalues, bins=bins)[0])
+    def perform_ks_test(self):
+        return st.kstest(self.pvalues, 'uniform', args=(0, 1))
     
     def get_charts(self, figsize=(8, 6)):
         """
