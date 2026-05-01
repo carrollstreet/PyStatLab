@@ -493,5 +493,5 @@ def bootstrap_ci(*samples,
 #             self.stat_lst = pr.resample(_resample_func, size)
 #             if self.n_jobs != 1:
 #                 pr.elapsed_time()
-            return (self._compute_ci(self.stat_lst), self.stat_lst) if self.return_dist else self._compute_ci(self.stat_lst)
-        return wrapper
+#            return (self._compute_ci(self.stat_lst), self.stat_lst) if self.return_dist else self._compute_ci(self.stat_lst)
+#        return wrapper
