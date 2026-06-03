@@ -4,6 +4,20 @@ from pystatlab.utility import ParallelResampler
 import warnings
 from functools import wraps
 
+def eta_squared(values, categories):    
+    values = np.asarray(values)
+    categories = np.asarray(categories)
+    if values.size != categories.size: 
+        raise ValueError("Values and categories must have the same size")
+    ssw = 0 
+    ssb = 0 
+    for category in set(categories):
+        subgroup = values[categories == category]
+        ssw += np.sum((subgroup-np.mean(subgroup))**2)
+        ssb += subgroup.size*(np.mean(subgroup)-np.mean(values))**2
+
+    return ssb / (ssb + ssw)
+
 def correlation_ratio(values, categories):
     """
     Calculates the correlation ratio, a measure of the relationship between a categorical variable and a continuous variable.
