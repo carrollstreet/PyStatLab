@@ -1,7 +1,7 @@
 import numpy as np
 from statsmodels.stats.proportion import proportions_ztest
 from statsmodels.stats.proportion import proportion_effectsize
-from statsmodels.stats.power import tt_ind_solve_power
+from statsmodels.stats.power import tt_ind_solve_power, NormalIndPower
 from pystatlab.utility import ParallelResampler
 import scipy.stats as st
 import matplotlib.pyplot as plt
@@ -199,82 +199,23 @@ def cohens_d(*args, from_samples=True):
         else:
             mu_1, mu_2, std_1, std_2 = args
             return abs(mu_1-mu_2) / ((std_1**2 + std_2**2) / 2)**.5
-        
-def proportion_size(p, uplift, n_comparison=1, alpha=0.05, power=0.8, groups=2):
-    """
-    Calculates the required sample size for detecting a given uplift in proportion, with specified significance level 
-    (alpha), power, and number of comparisons.
 
-    This function is useful for sample size determination in A/B testing or similar experiments where the goal is to 
-    detect a change in proportions with a given level of statistical significance and power.
-
-    Parameters
-    ----------
-    p : float
-        Baseline proportion (e.g., conversion rate) in the control group.
-    uplift : float
-        Expected relative increase in proportion in the test group compared to the control group.
-    n_comparison : int, default=1
-        Number of pairwise comparisons. For multiple comparisons, the alpha error is adjusted using the Šidák correction.
-    alpha : float, default=0.05
-        Significance level for the hypothesis test.
-    power : float, default=0.8
-        Desired power of the test.
-    groups : int, default=2
-        Number of groups in the experiment (e.g., 2 for a standard A/B test).
-
-    Returns
-    -------
-    float
-        Calculated sample size per group to achieve the desired power and significance level.
-
-    Notes
-    -----
-    The Šidák correction is applied for adjusting the alpha error in the case of multiple comparisons. The function 
-    allows specifying the desired significance level (alpha) and power, providing flexibility for different research 
-    designs. The effect size is calculated based on the expected uplift and the baseline proportion.
-    """
-    e = proportion_effectsize(p,p*(uplift+1))
-    return tt_ind_solve_power(effect_size=e,alpha=1-(1-alpha)**(1/n_comparison),power=power)*groups
-
-def ttest_size(avg, std, uplift, n_comparison=1, alpha=0.05, power=0.8, groups=2):
-    """
-    Calculates the required sample size for detecting a given uplift in means using an independent two-sample t-test, 
-    with specified significance level (alpha), power, and number of comparisons.
-
-    This function is designed for sample size determination in experiments like A/B testing where the goal is to detect 
-    a change in means with a given level of statistical significance and power.
-
-    Parameters
-    ----------
-    avg : float
-        Average (mean) of the baseline group.
-    std : float
-        Standard deviation of the baseline group.
-    uplift : float
-        Expected relative increase (uplift) in the mean for the test group compared to the control group.
-    n_comparison : int, default=1
-        Number of pairwise comparisons. For multiple comparisons, the alpha error is adjusted using the Šidák correction.
-    alpha : float, default=0.05
-        Significance level for the hypothesis test.
-    power : float, default=0.8
-        Desired power of the test.
-    groups : int, default=2
-        Number of groups in the experiment (e.g., 2 for a standard A/B test).
-
-    Returns
-    -------
-    float
-        Calculated sample size per group to achieve the desired power and significance level.
-
-    Notes
-    -----
-    The function uses the Šidák correction to adjust the alpha error for multiple comparisons. It calculates the 
-    effect size based on the expected uplift and the standard deviation of the baseline group. This approach is suitable 
-    for studies where the primary outcome is a continuous variable, and the objective is to compare means between two groups.
-    """
+def ttest_size(avg: float, std: float, uplift: float, n_comparison: int=1, alpha: float=0.05, power: float=0.8, groups: int=2) -> int:
+    if not 0 < uplift <= 1:
+        raise ValueError(f"uplift={uplift} должен быть в (0, 1]")
+    
     e = avg * uplift / std
-    return tt_ind_solve_power(effect_size=e, alpha=1-(1-alpha)**(1/n_comparison), power=power)*groups
+    alpha_adj = 1 - (1 - alpha) ** (1 / n_comparison)
+    return int(tt_ind_solve_power(effect_size=e, alpha=alpha_adj, power=power)) * groups
+
+
+def proportion_size(p: float, uplift: float, n_comparison: int=1, alpha: float=0.05, power: float=0.8, groups: int=2) -> int:
+    if not 0 < uplift <= 1:
+        raise ValueError(f"uplift={uplift} должен быть в (0, 1]")
+    
+    e = proportion_effectsize(p, p * (1 + uplift))
+    alpha_adj = 1 - (1 - alpha) ** (1 / n_comparison)
+    return int(NormalIndPower().solve_power(effect_size=e, alpha=alpha_adj, power=power)) * groups
 
 def expected_proportion(effect_size, proportion_1):
     """
