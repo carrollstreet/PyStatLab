@@ -168,70 +168,73 @@ def pareto_chart(collection, title=None, limit=None, layout_params={}):
     fig.show()
 
 def ci_chart(metrics,
-             central_values, 
-             lower_bounds, 
-             upper_bounds, 
-             title=None, 
-             xaxis_params={'tickformat':'.1%'}, 
-             layout_params={}):
-    """
-    Generates a chart to visualize confidence intervals for a set of metrics. Each metric is represented 
-    by a point, with horizontal error bars indicating the confidence interval.
+             central_values,
+             lower_bounds,
+             upper_bounds,
+             title=None,
+             vertical=True,
+             colored=True,
+             layout_params={}) -> go.Figure:
+    """colored=True: CI entirely below zero -> red, above zero -> green, crossing zero -> grey."""
 
-    Parameters
-    ----------
-    metrics : array-like
-        The names or identifiers of the metrics being visualized. These will appear on the y-axis.
-    central_values : array-like
-        The central or 'best estimate' values of the metrics. These values are plotted on the x-axis.
-    lower_bounds : array-like
-        The lower bounds of the confidence intervals for each metric.
-    upper_bounds : array-like
-        The upper bounds of the confidence intervals for each metric.
-    title : str, optional
-        The title of the chart. If None, no title is displayed.
-    xaxis_params : dict, optional
-        Additional parameters for customizing the x-axis, such as tick format. Defaults to a percentage format.
-    layout_params : dict, optional
-        Additional layout parameters for customizing the overall appearance of the chart.
+    metrics = np.asarray(list(metrics), dtype=object)
+    central_values, lower_bounds, upper_bounds = np.asarray(central_values, dtype=Float), np.asarray(lower_bounds, dtype=Float), np.asarray(upper_bounds, dtype=Float)
+    axis_params = {'tickformat': '.1%'}
 
-    Returns
-    -------
-    None
-        Displays the chart with confidence intervals.
+    if colored:
+        groups = [
+            ('significant decrease', upper_bounds < 0, '#d62728'),
+            ('significant increase', lower_bounds > 0, '#2ca02c'),
+            ('not significant', (lower_bounds <= 0) & (upper_bounds >= 0), '#7f7f7f'),
+        ]
+    else:
+        groups = [(None, np.ones(len(metrics), dtype=bool), None)]
 
-    Notes
-    -----
-    - The function uses Plotly's graphing library for visualization.
-    - Confidence intervals are visualized as horizontal error bars extending from the central values.
-    - This type of chart is useful for comparing the precision and relative positions of different metrics.
+    fig = go.Figure()
+    for name, mask, color in groups:
+        if not mask.any():
+            continue
+        c, lo, hi, m = central_values[mask], lower_bounds[mask], upper_bounds[mask], metrics[mask]
+        error = dict(type='data',
+                     symmetric=False,
+                     array=(hi - c).round(3),
+                     arrayminus=(c - lo).round(3),
+                     color=color)
+        customdata = np.stack([lo, hi], axis=-1)
+        if vertical:
+            trace = go.Scatter(
+                mode='markers', x=c, y=m, error_x=error, customdata=customdata,
+                hovertemplate=f"<b>%{{y}}</b><br>uplift: %{{x:.1%}}<br>CI: [%{{customdata[0]:.1%}}, %{{customdata[1]:.1%}}]<extra></extra>",
+            )
+        else:
+            trace = go.Scatter(
+                mode='markers', y=c, x=m, error_y=error, customdata=customdata,
+                hovertemplate=f"<b>%{{x}}</b><br>uplift: %{{y:.1%}}<br>CI: [%{{customdata[0]:.1%}}, %{{customdata[1]:.1%}}]<extra></extra>",
+            )
+        trace.update(name=name, marker_color=color, showlegend=colored)
+        fig.add_trace(trace)
 
-    Example
-    -------
-    >>> metrics = ['Metric A', 'Metric B', 'Metric C']
-    >>> central_values = [0.1, 0.15, 0.2]
-    >>> lower_bounds = [0.08, 0.13, 0.18]
-    >>> upper_bounds = [0.12, 0.17, 0.22]
-    >>> ci_chart(metrics, central_values, lower_bounds, upper_bounds, title='Confidence Interval Chart')
-    """
-    central_values, lower_bounds, upper_bounds = np.asarray(central_values), np.asarray(lower_bounds), np.asarray(upper_bounds)
-    
-    fig = go.Figure(data=go.Scatter(
-            mode='markers',
-                x=central_values,
-                y=metrics,
-                error_x=dict(
-                    type='data',
-                    symmetric=False,
-                    array=(upper_bounds-central_values).round(3),
-                    arrayminus=(central_values-lower_bounds).round(3))
-                ))
-    fig.add_vline(x=0, 
-                  line_dash="dash", 
+    # keep the original metric order across traces
+    category_axis = {'categoryorder': 'array', 'categoryarray': list(metrics)}
+    if vertical:
+        fig.add_vline(x=0,
+                      line_dash="dash",
+                      line_color="black")
+
+        fig.update_layout(template='plotly_white',
+                         title={'text': title,'x':.5},
+                         xaxis={**axis_params},
+                         yaxis=category_axis,
+                         **layout_params)
+    else:
+        fig.add_hline(y=0,
+                  line_dash="dash",
                   line_color="black")
-        
-    fig.update_layout(template='plotly_white',
-                     title={'text': title,'x':.5}, 
-                     xaxis={**xaxis_params},
-                     **layout_params)
-    fig.show()
+
+        fig.update_layout(template='plotly_white',
+                         title={'text': title,'x':.5},
+                         yaxis={**axis_params},
+                         xaxis=category_axis,
+                         **layout_params)
+
+    return fig
